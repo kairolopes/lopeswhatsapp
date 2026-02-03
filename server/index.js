@@ -32,7 +32,8 @@ const EVOLUTION_URL = process.env.EVOLUTION_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
 
 // Webhook Endpoint
-app.post('/webhook/kairoteste', (req, res) => {
+// Evolution API often sends webhooks to /webhook/{instanceName}
+app.post('/webhook/kairo2', (req, res) => {
   console.log('Webhook Header:', req.headers);
   console.log('Webhook Body:', JSON.stringify(req.body, null, 2));
 
@@ -55,7 +56,7 @@ app.post('/api/send-message', async (req, res) => {
     // Documentation says /message/sendText/{instance}
     // We'll fallback to a default instance name if not provided, or ask user.
     // For MVP, let's hardcode a placeholder or try to get it from env.
-    const instanceName = process.env.INSTANCE_NAME || 'LopesInstance';
+    const instanceName = process.env.INSTANCE_NAME || 'kairo2';
     const url = `${EVOLUTION_URL}/message/sendText/${instanceName}`;
 
     const response = await axios.post(url, {
