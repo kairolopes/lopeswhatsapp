@@ -3,17 +3,25 @@ import io from 'socket.io-client';
 import { Send, Menu, Phone, Video, Search } from 'lucide-react';
 import axios from 'axios';
 
-// Connect to backend
-const socket = io('http://localhost:3000');
+// Connect to backend (automatically detects host in production)
+const socket = io();
 
 function App() {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
+  const [targetNumber, setTargetNumber] = useState(''); // State for destination number
   const [status, setStatus] = useState('Disconnected');
 
   useEffect(() => {
-    socket.on('connect', () => setStatus('Connected'));
-    socket.on('disconnect', () => setStatus('Disconnected'));
+    socket.on('connect', () => {
+      console.log('Socket Connected');
+      setStatus('Connected');
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Socket Disconnected');
+      setStatus('Disconnected');
+    });
 
     socket.on('webhook_event', (event) => {
       console.log('New Event:', event);
@@ -30,16 +38,26 @@ function App() {
 
   const handleSend = async () => {
     if (!inputText.trim()) return;
+    if (!targetNumber) {
+      alert('Por favor, digite o número de telefone de destino (ex: 5511999999999)');
+      return;
+    }
 
     try {
-      // Mock sending to backend -> Evolution
-      // await axios.post('http://localhost:3000/api/send-message', { number: '...', text: inputText });
-
-      // Optimistic I
+      // Optimistic update
       setMessages([...messages, { type: 'out', text: inputText, time: new Date().toLocaleTimeString() }]);
+
+      // Sending to backend -> Evolution
+      // ensure number format involved if needed, usually Evolution expects full number (55...)
+      await axios.post('/api/send-message', {
+        number: targetNumber,
+        text: inputText
+      });
+
       setInputText('');
     } catch (error) {
       console.error('Send failed', error);
+      alert('Erro ao enviar mensagem. Verifique o console.');
     }
   };
 
@@ -51,6 +69,9 @@ function App() {
         <div className="h-[60px] bg-gray-100 flex items-center justify-between px-4 border-b border-gray-300">
           <div className="w-10 h-10 rounded-full bg-gray-300"></div>
           <div className="flex gap-4 text-gray-600">
+            <div className='text-xs flex flex-col items-end'>
+              <span>{status}</span>
+            </div>
             <Menu className="w-6 h-6" />
           </div>
         </div>
@@ -85,8 +106,15 @@ function App() {
           <div className="flex items-center">
             <div className="w-10 h-10 rounded-full bg-gray-300 mr-4"></div>
             <div>
-              <h2 className="font-semibold text-gray-800">João da Silva</h2>
-              <p className="text-xs text-gray-500">visto por último hoje às 14:02</p>
+              <h2 className="font-semibold text-gray-800">Chat de Teste</h2>
+              {/* Temporary Input for Number */}
+              <input
+                type="text"
+                placeholder="Número (55...)"
+                value={targetNumber}
+                onChange={(e) => setTargetNumber(e.target.value)}
+                className="text-xs border rounded px-1 ml-2"
+              />
             </div>
           </div>
           <div className="flex gap-6 text-gray-600">
@@ -98,13 +126,8 @@ function App() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-8 bg-[#efeae2] space-y-4">
           <div className="max-w-[60%] bg-white p-2 rounded-lg shadow-sm self-start rounded-tl-none">
-            <p className="text-sm text-gray-800">Olá! Como posso ajudar?</p>
+            <p className="text-sm text-gray-800">Olá! Coloque o número de destino lá em cima para testar.</p>
             <span className="text-[10px] text-gray-500 float-right mt-1 ml-2">10:00</span>
-          </div>
-
-          <div className="max-w-[60%] bg-[#d9fdd3] p-2 rounded-lg shadow-sm self-end ml-auto rounded-tr-none">
-            <p className="text-sm text-gray-800">Gostaria de saber sobre o status do meu pedido.</p>
-            <span className="text-[10px] text-gray-500 float-right mt-1 ml-2">10:01</span>
           </div>
 
           {messages.map((msg, idx) => (
