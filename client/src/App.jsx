@@ -25,8 +25,31 @@ function App() {
 
     socket.on('webhook_event', (event) => {
       console.log('New Event:', event);
-      // Logic to parse Evolution API event and add to messages
-      // For now, just logging and optionally dumping to UI
+
+      // Basic parsing for Evolution API "messages.upsert"
+      // This path depends on the exact JSON structure Evolution sends
+      const msgData = event?.data;
+      if (msgData && msgData.key && !msgData.key.fromMe) {
+        const remoteJid = msgData.key.remoteJid || '';
+        const number = remoteJid.split('@')[0];
+
+        // Extract text message (supports simple text and extended text)
+        let text = '';
+        if (msgData.message?.conversation) {
+          text = msgData.message.conversation;
+        } else if (msgData.message?.extendedTextMessage?.text) {
+          text = msgData.message.extendedTextMessage.text;
+        }
+
+        if (text) {
+          setMessages(prev => [...prev, {
+            type: 'in',
+            text: text,
+            time: new Date().toLocaleTimeString(),
+            sender: number
+          }]);
+        }
+      }
     });
 
     return () => {
