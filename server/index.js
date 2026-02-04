@@ -38,14 +38,18 @@ let EVOLUTION_URL = process.env.EVOLUTION_URL;
 if (EVOLUTION_URL && EVOLUTION_URL.endsWith('/')) {
     EVOLUTION_URL = EVOLUTION_URL.slice(0, -1);
 }
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
+let EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
+if (EVOLUTION_API_KEY) {
+    EVOLUTION_API_KEY = EVOLUTION_API_KEY.trim();
+}
+
 const INSTANCE_NAME = process.env.INSTANCE_NAME || 'kairo2';
 
 // Check config on startup
 console.log('--- Server Config ---');
 console.log('PORT:', PORT);
 console.log('EVOLUTION_URL:', EVOLUTION_URL ? EVOLUTION_URL : 'MISSING');
-console.log('EVOLUTION_API_KEY:', EVOLUTION_API_KEY ? '******' + EVOLUTION_API_KEY.slice(-4) : 'MISSING');
+console.log('EVOLUTION_API_KEY:', EVOLUTION_API_KEY ? `******${EVOLUTION_API_KEY.slice(-4)} (Length: ${EVOLUTION_API_KEY.length})` : 'MISSING');
 console.log('INSTANCE_NAME:', INSTANCE_NAME);
 console.log('---------------------');
 
@@ -66,9 +70,8 @@ app.post('/api/send-message', async (req, res) => {
     if (!number || !text) return res.status(400).json({ error: 'Missing number or text' });
 
     console.log(`Sending text to ${number}: ${text}`);
+    console.log(`Target URL: ${url}`); // Debug Log
 
-    const url = `${EVOLUTION_URL}/message/sendText/${INSTANCE_NAME}`;
-    
     // Headers for Evolution API
     const headers = {
         'Content-Type': 'application/json',
@@ -88,10 +91,13 @@ app.post('/api/send-message', async (req, res) => {
     }, { headers });
 
     res.json(response.data);
-  } catch (error) {
-    console.error('Error sending message:', error.response?.data || error.message);
+    } catch (error) {
+    console.error(`Error sending message to ${url}`);
+    console.error('Status:', error.response?.status);
+    console.error('Response Data:', JSON.stringify(error.response?.data || {}, null, 2));
+    
     if (error.response?.status === 401) {
-        console.error('CRITICAL: 401 Unauthorized. Check EVOLUTION_API_KEY.');
+        console.error('CRITICAL: 401 Unauthorized. Verify EVOLUTION_API_KEY in Render Environment Variables.');
     }
     res.status(error.response?.status || 500).json({ 
         error: 'Failed to send message', 
@@ -117,6 +123,7 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         // It expects 'number', 'mediatype', 'mimetype', 'caption', 'attachment' (file)
         
         const url = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
+        console.log(`Target URL: ${url}`); // Debug Log
         
         const formData = new FormData();
         formData.append('number', number);
@@ -138,9 +145,16 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
 
         res.json(response.data);
     } catch (error) {
-        console.error('Error sending media:', error.response?.data || error.message);
+        console.error(`Error sending media to ${url}`);
+        console.error('Status:', error.response?.status);
+        console.error('Response Data:', JSON.stringify(error.response?.data || {}, null, 2));
+
         if (req.file && req.file.path) fs.unlinkSync(req.file.path); // cleanup on error
         
+        if (error.response?.status === 401) {
+             console.error('CRITICAL: 401 Unauthorized. Verify EVOLUTION_API_KEY in Render Environment Variables.');
+        }
+
         res.status(error.response?.status || 500).json({ 
             error: 'Failed to send media', 
             details: error.response?.data || error.message 
