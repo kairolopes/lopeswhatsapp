@@ -510,15 +510,23 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
              formData.append('audio', fs.createReadStream(file.path));
              // Some versions allow delay/presence options here too
         } else {
-             // Generic Media (Image, Video, Document)
-             url = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
-             formData.append('mediatype', 'image'); // Default to image, could be video
-             formData.append('mimetype', file.mimetype);
+             // Prefer dedicated endpoint for images when available
+             const mediaType = (type && type.toLowerCase()) || 'image';
              if (caption) formData.append('caption', caption);
-             // Append both common field names for broader API compatibility
-             const stream = fs.createReadStream(file.path);
-             formData.append('attachment', stream);
-             formData.append('file', fs.createReadStream(file.path));
+             // Attempt multiple compatible endpoints/field names for broader Evolution versions
+             const streams = {
+                 image: fs.createReadStream(file.path),
+                 file: fs.createReadStream(file.path),
+                 attachment: fs.createReadStream(file.path)
+             };
+             const attempts = [
+                 { url: `${EVOLUTION_URL}/message/sendImage/${INSTANCE_NAME}`, field: 'image' },
+                 { url: `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`, field: 'file' },
+                 { url: `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`, field: 'attachment' }
+             ];
+             // Use the first attempt matching the mediaType, but still fall back if it fails
+             url = attempts[0].url;
+             formData.append(attempts[0].field, streams[attempts[0].field]);
         }
 
         console.log(`Target URL: ${url}`); 
@@ -551,7 +559,22 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
                     throw fallbackError;
                 }
             } else {
-                throw primaryError;
+                // Try additional fallbacks for image/media
+                const fallbacks = [
+                    { url: `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`, build: (p) => { const f = new FormData(); f.append('number', number); if (caption) f.append('caption', caption); f.append('file', fs.createReadStream(p)); return f; } },
+                    { url: `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`, build: (p) => { const f = new FormData(); f.append('number', number); if (caption) f.append('caption', caption); f.append('attachment', fs.createReadStream(p)); return f; } }
+                ];
+                for (const fb of fallbacks) {
+                    try {
+                        const fform = fb.build(file.path);
+                        const fh = { ...fform.getHeaders(), apikey: EVOLUTION_API_KEY };
+                        response = await axios.post(fb.url, fform, { headers: fh });
+                        break;
+                    } catch {}
+                }
+                if (!response) {
+                    throw primaryError;
+                }
             }
         }
 
