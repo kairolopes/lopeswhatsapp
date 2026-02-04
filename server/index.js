@@ -110,6 +110,7 @@ app.post('/api/send-message', async (req, res) => {
 
 // Proxy Endpoint to send MEDIA (Image/Audio)
 app.post('/api/send-media', upload.single('file'), async (req, res) => {
+    let url = ''; // Define url here to be accessible in catch block
     try {
         const { number, type, caption } = req.body;
         const file = req.file;
@@ -124,7 +125,7 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         // Endpoint usually: /message/sendMedia/{instance}
         // It expects 'number', 'mediatype', 'mimetype', 'caption', 'attachment' (file)
         
-        const url = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
+        url = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
         console.log(`Target URL: ${url}`); 
         
         const formData = new FormData();
