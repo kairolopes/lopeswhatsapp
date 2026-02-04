@@ -531,6 +531,7 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         };
 
         let response;
+        let previewUrl = null;
         try {
             response = await axios.post(url, formData, { 
                 headers,
@@ -557,11 +558,13 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
                     const mediaUrl = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
                     try {
                         response = await axios.post(mediaUrl, { number, mediatype: 'audio', url: fileUrl, caption }, { headers: jsonHeaders });
+                        previewUrl = fileUrl;
                     } catch (urlErr) {
                         // Final fallback: send as base64 data URL
                         const base64 = fs.readFileSync(file.path, { encoding: 'base64' });
                         const dataUrl = `data:${file.mimetype};base64,${base64}`;
                         response = await axios.post(mediaUrl, { number, mediatype: 'audio', base64: dataUrl, caption }, { headers: jsonHeaders });
+                        previewUrl = dataUrl;
                     }
                 }
             } else {
@@ -574,11 +577,13 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
                     const mediaUrl = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
                     try {
                         response = await axios.post(mediaUrl, { number, mediatype: 'image', url: fileUrl, caption }, { headers: jsonHeaders });
+                        previewUrl = fileUrl;
                     } catch (urlFallbackError) {
                         // Final fallback: base64 data URL
                         const base64 = fs.readFileSync(file.path, { encoding: 'base64' });
                         const dataUrl = `data:${file.mimetype};base64,${base64}`;
                         response = await axios.post(mediaUrl, { number, mediatype: 'image', base64: dataUrl, caption }, { headers: jsonHeaders });
+                        previewUrl = dataUrl;
                     }
                 } catch (urlFallbackError) {
                     // Try additional multipart fallbacks for image/media
@@ -605,7 +610,7 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         if (response.data && response.data.key) {
             const msgId = response.data.key.id;
             const remoteJid = response.data.key.remoteJid || (number.includes('@') ? number : number + '@s.whatsapp.net');
-            const content = caption || (type === 'audio' ? '[Áudio Enviado]' : '[Mídia Enviada]');
+            const content = previewUrl || caption || (type === 'audio' ? '[Áudio Enviado]' : '[Mídia Enviada]');
             
             saveMessage({
                 id: msgId,
@@ -618,8 +623,10 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
             });
         }
 
-        // Clean up temp file
-        fs.unlinkSync(file.path);
+        // Clean up temp file unless used as previewUrl (keep if serving via /uploads)
+        if (!previewUrl || !previewUrl.includes('/uploads/')) {
+            try { fs.unlinkSync(file.path); } catch {}
+        }
 
         res.json(response.data);
     } catch (error) {
@@ -653,15 +660,29 @@ app.post('/api/send-audio', async (req, res) => {
         }
         const headers = { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY };
         const target = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
-        const payload = { number, mediatype: 'audio' };
+    const payload = { number, mediatype: 'audio' };
         if (base64) payload.base64 = base64;
         if (url) payload.url = url;
+    // Try to provide mimetype for better compatibility
+    let mimetype = null;
+    if (base64 && typeof base64 === 'string') {
+        if (base64.startsWith('data:') && base64.includes(';base64,')) {
+            mimetype = base64.substring(5, base64.indexOf(';base64,'));
+        }
+    }
+    if (!mimetype && url) {
+        if (url.toLowerCase().endsWith('.mp3')) mimetype = 'audio/mpeg';
+        else if (url.toLowerCase().endsWith('.ogg')) mimetype = 'audio/ogg';
+        else if (url.toLowerCase().endsWith('.wav')) mimetype = 'audio/wav';
+        else if (url.toLowerCase().endsWith('.webm')) mimetype = 'audio/webm';
+    }
+    if (mimetype) payload.mimetype = mimetype;
         if (caption) payload.caption = caption;
         const response = await axios.post(target, payload, { headers });
         if (response.data && response.data.key) {
             const msgId = response.data.key.id;
             const remoteJid = response.data.key.remoteJid || (number.includes('@') ? number : number + '@s.whatsapp.net');
-            const content = caption || '[Áudio Enviado]';
+            const content = base64 || url || caption || '[Áudio Enviado]';
             saveMessage({
                 id: msgId,
                 remoteJid,

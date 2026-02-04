@@ -3,10 +3,13 @@ import { Smile, Paperclip, Mic, Send, Image as ImageIcon, X } from 'lucide-react
 import EmojiPicker from 'emoji-picker-react';
 import { cn } from '../lib/utils';
 
-export const ChatInput = ({ onSend, onSendMedia }) => {
+export const ChatInput = ({ onSend, onSendMedia, onSendAudio }) => {
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const fileInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const [recording, setRecording] = useState(false);
 
   const handleSend = () => {
     if (text.trim()) {
@@ -36,6 +39,40 @@ export const ChatInput = ({ onSend, onSendMedia }) => {
       onSendMedia(file);
       e.target.value = null; // reset
     }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      mediaRecorderRef.current = mr;
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      mr.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        chunksRef.current = [];
+        // Stop all tracks
+        stream.getTracks().forEach(t => t.stop());
+        if (onSendAudio) {
+          await onSendAudio(blob);
+        }
+      };
+      mr.start();
+      setRecording(true);
+    } catch (err) {
+      console.error('Mic error:', err);
+      alert('Não foi possível acessar o microfone.');
+    }
+  };
+
+  const stopRecording = () => {
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state !== 'inactive') {
+      mr.stop();
+    }
+    setRecording(false);
   };
 
   return (
@@ -95,7 +132,11 @@ export const ChatInput = ({ onSend, onSendMedia }) => {
             <Send size={24} />
           </button>
         ) : (
-          <button className="text-gray-500 hover:text-gray-700">
+          <button 
+            onClick={() => recording ? stopRecording() : startRecording()}
+            className={cn("transition-colors", recording ? "text-red-600 animate-pulse" : "text-gray-500 hover:text-gray-700")}
+            title={recording ? "Parar gravação" : "Gravar áudio"}
+          >
              <Mic size={24} />
           </button>
         )}

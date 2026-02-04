@@ -10,6 +10,7 @@ export const ChatWindow = ({
   onBack, 
   onSend,
   onSendMedia,
+  onSendAudio,
   onHeaderClick,
   className 
 }) => {
@@ -85,7 +86,7 @@ export const ChatWindow = ({
       </div>
 
       {/* Input Area */}
-      <ChatInput onSend={onSend} onSendMedia={onSendMedia} />
+      <ChatInput onSend={onSend} onSendMedia={onSendMedia} onSendAudio={onSendAudio} />
     </div>
   );
 };

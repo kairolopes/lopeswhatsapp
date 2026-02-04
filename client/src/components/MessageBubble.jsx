@@ -33,9 +33,7 @@ export const MessageBubble = ({ message, isOwn }) => {
           )}
           
           {message.type === 'audio' && (
-             <audio controls className="w-full min-w-[200px] h-10">
-                <source src={message.mediaUrl} type="audio/mpeg" />
-                Your browser does not support the audio element.
+             <audio controls className="w-full min-w-[200px] h-10" src={message.mediaUrl}>
              </audio>
           )}
 

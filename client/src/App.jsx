@@ -56,16 +56,23 @@ function App() {
     const fetchMessages = async () => {
         try {
             const res = await axios.get(`/api/messages/${activeChatId}`);
-            const formattedMessages = res.data.map(m => ({
-                id: m.id,
-                type: m.fromMe ? 'out' : 'in',
-                msgType: m.type === 'imageMessage' ? 'image' : (m.type === 'audioMessage' ? 'audio' : 'text'),
-                text: m.content, // Content handling depends on type, simplfied here
-                mediaUrl: '', // URL handling if stored
-                time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                sender: m.fromMe ? 'me' : m.remoteJid,
-                pushName: m.pushName
-            }));
+            const formattedMessages = res.data.map(m => {
+                const isImage = m.type === 'imageMessage';
+                const isAudio = m.type === 'audioMessage';
+                const content = m.content || '';
+                const looksLikeUrl = typeof content === 'string' && (content.startsWith('http') || content.startsWith('data:'));
+                return {
+                    id: m.id,
+                    type: m.fromMe ? 'out' : 'in',
+                    msgType: isImage ? 'image' : (isAudio ? 'audio' : 'text'),
+                    text: isImage ? (looksLikeUrl ? 'Imagem' : content || 'Imagem') 
+                         : (isAudio ? (looksLikeUrl ? 'Áudio' : content || 'Áudio') : content),
+                    mediaUrl: looksLikeUrl ? content : '',
+                    time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    sender: m.fromMe ? 'me' : m.remoteJid,
+                    pushName: m.pushName
+                };
+            });
             
             // Adjust content based on type for display
             const processedMessages = formattedMessages.map(m => {
@@ -376,6 +383,47 @@ function App() {
     }
   };
 
+  const handleSendAudio = async (blob) => {
+    if (!activeChatId) return;
+    try {
+      const tempUrl = URL.createObjectURL(blob);
+      const pendingId = 'PENDING:' + Date.now();
+      const newMessage = {
+        id: pendingId,
+        type: 'out',
+        msgType: 'audio',
+        text: 'Áudio',
+        mediaUrl: tempUrl,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setMessages(prev => ({
+        ...prev,
+        [activeChatId]: [...(prev[activeChatId] || []), newMessage]
+      }));
+      setChats(prev => prev.map(c => 
+        c.id === activeChatId 
+          ? { ...c, lastMessage: '🎤 Áudio', lastMessageTime: newMessage.time } 
+          : c
+      ));
+      const arrayBuffer = await blob.arrayBuffer();
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      const dataUrl = `data:${blob.type || 'audio/webm'};base64,${base64}`;
+      const res = await axios.post('/api/send-audio', { number: activeChatId, base64: dataUrl, caption: 'Áudio' });
+      const realId = res?.data?.key?.id;
+      if (realId) {
+        setMessages(prev => {
+          const chatMessages = prev[activeChatId] || [];
+          const updated = chatMessages.map(m => (m.id === pendingId ? { ...m, id: realId } : m));
+          return { ...prev, [activeChatId]: updated };
+        });
+      }
+      try { await axios.post(`/api/chats/${activeChatId}/read`); } catch(e) {}
+    } catch (error) {
+      console.error('Failed to send audio', error);
+      alert('Erro ao enviar áudio');
+    }
+  };
+
   const handleDeleteChat = async () => {
     if (!activeChatId) return;
     if (!window.confirm('Tem certeza que deseja apagar esta conversa? Somente você pode fazer isso.')) return;
@@ -470,6 +518,7 @@ function App() {
               onBack={() => setActiveChatId(null)}
               onSend={handleSendMessage}
               onSendMedia={handleSendMedia}
+        onSendAudio={handleSendAudio}
               onHeaderClick={() => setShowProfileInfo(!showProfileInfo)}
               className="flex-1 h-full"
             />
