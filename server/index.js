@@ -290,6 +290,18 @@ app.get('/api/unread-counts', (req, res) => {
     });
 });
 
+// Health/Debug endpoint
+app.get('/api/health', (req, res) => {
+    res.json({
+        ok: true,
+        port: PORT,
+        instance: INSTANCE_NAME,
+        dbPath,
+        evolutionUrlSet: Boolean(EVOLUTION_URL),
+        apiKeySet: Boolean(EVOLUTION_API_KEY)
+    });
+});
+
 app.delete('/api/chats/:remoteJid', (req, res) => {
     const { remoteJid } = req.params;
     // Transaction to delete messages and then chat
