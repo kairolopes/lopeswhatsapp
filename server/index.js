@@ -102,6 +102,55 @@ app.get('/api/simulate-webhook', (req, res) => {
     res.json({ success: true, message: 'Simulated event emitted', payload: fakeEvent });
 });
 
+// Automatic Webhook Setup Endpoint
+app.get('/api/setup-webhook', async (req, res) => {
+    try {
+        // Construct the webhook URL based on the current request host (or environment variable)
+        const host = req.get('host');
+        const protocol = req.protocol === 'http' && host.includes('localhost') ? 'http' : 'https';
+        const webhookUrl = `${protocol}://${host}/webhook/${INSTANCE_NAME}`;
+        
+        const url = `${EVOLUTION_URL}/webhook/set/${INSTANCE_NAME}`;
+        const headers = { 
+            'Content-Type': 'application/json',
+            'apikey': EVOLUTION_API_KEY 
+        };
+        
+        const payload = {
+            "webhook": {
+                "enabled": true,
+                "url": webhookUrl,
+                "webhookByEvents": false,
+                "events": [
+                    "MESSAGES_UPSERT",
+                    "MESSAGES_UPDATE",
+                    "SEND_MESSAGE"
+                ]
+            }
+        };
+
+        console.log(`Setting up webhook to: ${webhookUrl}`);
+        // Try the v2 endpoint structure
+        const response = await axios.post(url, payload, { headers });
+        
+        res.json({ 
+            success: true, 
+            message: 'Webhook configured successfully', 
+            target_webhook: webhookUrl,
+            evolution_response: response.data 
+        });
+    } catch (error) {
+        console.error('Webhook Setup Failed:', error.message);
+        // Fallback: Try alternative endpoint for some Evolution versions
+        res.status(500).json({ 
+            success: false, 
+            error: error.message,
+            details: error.response?.data,
+            hint: "If 404, check if instance name is correct. If 401, check API Key."
+        });
+    }
+});
+
 // Test Connection Endpoint
 app.get('/api/test-connection', async (req, res) => {
     try {
