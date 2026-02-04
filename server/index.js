@@ -123,22 +123,29 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         // It expects 'number', 'mediatype', 'mimetype', 'caption', 'attachment' (file)
         
         const url = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
-        console.log(`Target URL: ${url}`); // Debug Log
+        console.log(`Target URL: ${url}`); 
         
         const formData = new FormData();
         formData.append('number', number);
         formData.append('mediatype', type === 'audio' ? 'audio' : 'image');
-        // mimetype is handled by fs read stream usually, or we pass explicitly
         formData.append('mimetype', file.mimetype);
         if (caption) formData.append('caption', caption);
         formData.append('attachment', fs.createReadStream(file.path));
 
+        const formHeaders = formData.getHeaders();
         const headers = {
-            ...formData.getHeaders(),
+            ...formHeaders,
             'apikey': EVOLUTION_API_KEY
         };
 
-        const response = await axios.post(url, formData, { headers });
+        console.log('Sending Media Request...');
+        console.log('Headers (Cleaned):', JSON.stringify({ ...headers, apikey: '******' }));
+
+        const response = await axios.post(url, formData, { 
+            headers,
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity
+        });
 
         // Clean up temp file
         fs.unlinkSync(file.path);
