@@ -642,12 +642,28 @@ app.post('/chat/fetchProfile/:instance', async (req, res) => {
                 'apikey': EVOLUTION_API_KEY
             }
         });
-        
+        // Fallback: if picture missing, try dedicated endpoint to fetch profile picture URL
+        let pictureFromProfile = response.data?.picture || response.data?.profilePictureUrl || null;
+        if (!pictureFromProfile) {
+            try {
+                const picUrl = `${EVOLUTION_URL}/chat/fetchProfilePictureUrl/${targetInstance}`;
+                const picRes = await axios.post(picUrl, { number }, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': EVOLUTION_API_KEY
+                    }
+                });
+                pictureFromProfile = picRes.data?.profilePictureUrl || picRes.data?.picture || pictureFromProfile;
+                response.data = { ...(response.data || {}), profilePictureUrl: pictureFromProfile };
+            } catch (e) {
+                // ignore if picture retrieval fails
+            }
+        }
         // Persist basic contact info to local DB
         try {
             const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
             const name = response.data?.name || number;
-            const picture = response.data?.picture || response.data?.profilePictureUrl || null;
+            const picture = pictureFromProfile || null;
             db.run(`INSERT OR IGNORE INTO chats (remoteJid, name, lastMessageTimestamp) VALUES (?, ?, ?)`, 
                 [remoteJid, name, Date.now()]);
             if (picture) {
