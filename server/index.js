@@ -549,7 +549,13 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
                     const fbUrl = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
                     response = await axios.post(fbUrl, fallbackForm, { headers: fbHeaders });
                 } catch (fallbackError) {
-                    throw fallbackError;
+                    // Fallback to URL-based audio send
+                    const host = req.get('host');
+                    const protocol = req.protocol === 'http' && host.includes('localhost') ? 'http' : 'https';
+                    const fileUrl = `${protocol}://${host}/uploads/${path.basename(file.path)}`;
+                    const jsonHeaders = { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY };
+                    const mediaUrl = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
+                    response = await axios.post(mediaUrl, { number, mediatype: 'audio', url: fileUrl, caption }, { headers: jsonHeaders });
                 }
             } else {
                 // Try JSON URL-based fallback so Evolution fetches the file from our server
