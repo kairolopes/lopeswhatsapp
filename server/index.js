@@ -514,21 +514,12 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         } else {
              // Prefer dedicated endpoint for images when available
              const mediaType = (type && type.toLowerCase()) || 'image';
+             // Default to generic sendMedia, which is widely supported
+             url = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
+             formData.append('mediatype', mediaType);
+             formData.append('mimetype', file.mimetype);
              if (caption) formData.append('caption', caption);
-             // Attempt multiple compatible endpoints/field names for broader Evolution versions
-             const streams = {
-                 image: fs.createReadStream(file.path),
-                 file: fs.createReadStream(file.path),
-                 attachment: fs.createReadStream(file.path)
-             };
-             const attempts = [
-                 { url: `${EVOLUTION_URL}/message/sendImage/${INSTANCE_NAME}`, field: 'image' },
-                 { url: `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`, field: 'file' },
-                 { url: `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`, field: 'attachment' }
-             ];
-             // Use the first attempt matching the mediaType, but still fall back if it fails
-             url = attempts[0].url;
-             formData.append(attempts[0].field, streams[attempts[0].field]);
+             formData.append('file', fs.createReadStream(file.path));
         }
 
         console.log(`Target URL: ${url}`); 
@@ -567,8 +558,8 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
                     const protocol = req.protocol === 'http' && host.includes('localhost') ? 'http' : 'https';
                     const fileUrl = `${protocol}://${host}/uploads/${path.basename(file.path)}`;
                     const jsonHeaders = { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY };
-                    const imgUrl = `${EVOLUTION_URL}/message/sendImage/${INSTANCE_NAME}`;
-                    response = await axios.post(imgUrl, { number, url: fileUrl, caption }, { headers: jsonHeaders });
+                    const mediaUrl = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
+                    response = await axios.post(mediaUrl, { number, mediatype: 'image', url: fileUrl, caption }, { headers: jsonHeaders });
                 } catch (urlFallbackError) {
                     // Try additional multipart fallbacks for image/media
                 const fallbacks = [
