@@ -55,12 +55,38 @@ console.log('---------------------');
 
 // Webhook Endpoint
 app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
-  console.log('Webhook Header:', req.headers);
-  console.log('Webhook Body:', JSON.stringify(req.body, null, 2));
+  console.log('--- Incoming Webhook ---');
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Body:', JSON.stringify(req.body, null, 2));
+  console.log('------------------------');
 
   const event = req.body;
   io.emit('webhook_event', event);
   res.status(200).send('OK');
+});
+
+// Test Connection Endpoint
+app.get('/api/test-connection', async (req, res) => {
+    try {
+        const url = `${EVOLUTION_URL}/instance/fetchInstances`;
+        const headers = { 'apikey': EVOLUTION_API_KEY };
+        
+        console.log(`Testing connection to: ${url}`);
+        const response = await axios.get(url, { headers });
+        
+        res.json({ 
+            success: true, 
+            message: 'Connection successful', 
+            instances: response.data 
+        });
+    } catch (error) {
+        console.error('Connection Test Failed:', error.message);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message,
+            details: error.response?.data 
+        });
+    }
 });
 
 // Proxy Endpoint to send TEXT messages
@@ -112,7 +138,7 @@ app.post('/api/send-message', async (req, res) => {
 
 // Proxy Endpoint to send MEDIA (Image/Audio)
 app.post('/api/send-media', upload.single('file'), async (req, res) => {
-    let url = ''; // Define url here to be accessible in catch block
+    let url = ''; 
     try {
         const { number, type, caption } = req.body;
         const file = req.file;
@@ -123,28 +149,31 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
 
         console.log(`Sending media (${type}) to ${number}: ${file.originalname}`);
 
-        // Prepare FormData for Evolution API
-        // Endpoint usually: /message/sendMedia/{instance}
-        // It expects 'number', 'mediatype', 'mimetype', 'caption', 'attachment' (file)
-        
-        url = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
-        console.log(`Target URL: ${url}`); 
-        
         const formData = new FormData();
         formData.append('number', number);
-        formData.append('mediatype', type === 'audio' ? 'audio' : 'image');
-        formData.append('mimetype', file.mimetype);
-        if (caption) formData.append('caption', caption);
-        formData.append('attachment', fs.createReadStream(file.path));
+        
+        // Handle specific media types
+        if (type === 'audio') {
+             // Evolution API specific for Voice Notes (PTT)
+             url = `${EVOLUTION_URL}/message/sendWhatsAppAudio/${INSTANCE_NAME}`;
+             formData.append('audio', fs.createReadStream(file.path));
+             // Some versions allow delay/presence options here too
+        } else {
+             // Generic Media (Image, Video, Document)
+             url = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
+             formData.append('mediatype', 'image'); // Default to image, could be video
+             formData.append('mimetype', file.mimetype);
+             if (caption) formData.append('caption', caption);
+             formData.append('attachment', fs.createReadStream(file.path));
+        }
 
+        console.log(`Target URL: ${url}`); 
+        
         const formHeaders = formData.getHeaders();
         const headers = {
             ...formHeaders,
             'apikey': EVOLUTION_API_KEY
         };
-
-        console.log('Sending Media Request...');
-        console.log('Headers (Cleaned):', JSON.stringify({ ...headers, apikey: '******' }));
 
         const response = await axios.post(url, formData, { 
             headers,
@@ -157,11 +186,15 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
 
         res.json(response.data);
     } catch (error) {
-        console.error(`Error sending media to ${url}`);
+        // Only access url if it was defined
+        const targetUrl = typeof url !== 'undefined' ? url : 'unknown';
+        console.error(`Error sending media to ${targetUrl}`);
         console.error('Status:', error.response?.status);
         console.error('Response Data:', JSON.stringify(error.response?.data || {}, null, 2));
 
-        if (req.file && req.file.path) fs.unlinkSync(req.file.path); // cleanup on error
+        if (req.file && req.file.path) {
+            try { fs.unlinkSync(req.file.path); } catch(e) {} // cleanup
+        }
         
         if (error.response?.status === 401) {
              console.error('CRITICAL: 401 Unauthorized. Verify EVOLUTION_API_KEY in Render Environment Variables.');

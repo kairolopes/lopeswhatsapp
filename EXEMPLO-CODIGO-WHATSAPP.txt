@@ -1,0 +1,565 @@
+RECEBER MENSAGENS WHATSAPP
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    const body = await req.json();
+    console.log('Webhook received:', JSON.stringify(body, null, 2));
+
+    // ✅ Extrair dados do Z-API
+    const { 
+      phone, 
+      isGroup, 
+      isNewsletter,
+      text,           // { message: "..." }
+      image,          // imagens
+      video,          // vídeos
+      audio,          // áudios
+      document,       // documentos
+      location,       // localização
+      senderName,     // 👤 NOME DO CLIENTE (do perfil do WhatsApp)
+      senderPhoto,    // 📷 FOTO DO CLIENTE
+      photo,          // foto alternativa
+      fromMe,         // mensagem enviada por nós?
+      messageId,
+      type,           // tipo do evento
+    } = body;
+
+    // ❌ Ignorar grupos, newsletters e mensagens nossas
+    if (type !== 'ReceivedCallback' || isGroup || isNewsletter || fromMe) {
+      return new Response(JSON.stringify({ success: true, ignored: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (!phone) {
+      return new Response(JSON.stringify({ success: true, ignored: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // 📱 Normalizar telefone
+    const normalizedPhone = phone.replace('@c.us', '').replace(/\D/g, '');
+    
+    // 📨 Identificar tipo e conteúdo da mensagem
+    let messageContent = '';
+    let messageType = 'text';
+    let mediaUrl = null;
+
+    if (text?.message) {
+      messageContent = text.message;
+      messageType = 'text';
+    } else if (image) {
+      messageContent = image.caption || '[Imagem]';
+      messageType = 'image';
+      mediaUrl = image.imageUrl || image.url;
+    } else if (video) {
+      messageContent = video.caption || '[Vídeo]';
+      messageType = 'video';
+      mediaUrl = video.videoUrl || video.url;
+    } else if (audio) {
+      messageContent = '[Áudio]';
+      messageType = 'audio';
+      mediaUrl = audio.audioUrl || audio.url;
+    } else if (document) {
+      messageContent = document.fileName || '[Documento]';
+      messageType = 'document';
+      mediaUrl = document.documentUrl || document.url;
+    } else if (location) {
+      messageContent = `[Localização: ${location.name || 'Local'}]`;
+      messageType = 'location';
+    } else {
+      return new Response(JSON.stringify({ success: true, ignored: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const profilePhoto = photo || senderPhoto || null;
+
+    // 💬 Buscar ou criar conversa
+    let { data: conversation, error: convError } = await supabase
+      .from('whatsapp_conversations')
+      .select('*')
+      .eq('phone', normalizedPhone)
+      .single();
+
+    if (convError && convError.code === 'PGRST116') {
+      // Criar nova conversa
+      const { data: newConv, error: createError } = await supabase
+        .from('whatsapp_conversations')
+        .insert({
+          phone: normalizedPhone,
+          profile_name: senderName || null,       // ✅ Nome do WhatsApp
+          profile_photo_url: profilePhoto,         // ✅ Foto do WhatsApp
+          status: 'novo',
+          ai_enabled: true,
+          unread_count: 1,
+          last_message_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (createError) throw createError;
+      conversation = newConv;
+    } else if (convError) {
+      throw convError;
+    } else {
+      // Atualizar conversa existente
+      const { error: updateError } = await supabase
+        .from('whatsapp_conversations')
+        .update({
+          profile_name: senderName || conversation.profile_name,
+          profile_photo_url: senderPhoto || conversation.profile_photo_url,
+          unread_count: (conversation.unread_count || 0) + 1,
+          last_message_at: new Date().toISOString(),
+        })
+        .eq('id', conversation.id);
+
+      if (updateError) console.error('Error updating conversation:', updateError);
+    }
+
+    // 👤 Auto-criar/atualizar paciente
+    const { data: existingPatient } = await supabase
+      .from('patients')
+      .select('id, full_name, profile_photo_url')
+      .eq('phone', normalizedPhone)
+      .single();
+
+    let patientId = conversation.patient_id;
+
+    if (existingPatient) {
+      // Atualizar dados do paciente se faltando
+      const updates: Record<string, string> = {};
+      if (!existingPatient.profile_photo_url && profilePhoto) {
+        updates.profile_photo_url = profilePhoto;
+      }
+      if (senderName && existingPatient.full_name?.startsWith('WhatsApp ')) {
+        updates.full_name = senderName;
+      }
+      if (Object.keys(updates).length > 0) {
+        await supabase.from('patients').update(updates).eq('id', existingPatient.id);
+      }
+      patientId = existingPatient.id;
+    } else {
+      // Criar paciente automaticamente
+      const { data: newPatient } = await supabase
+        .from('patients')
+        .insert({
+          full_name: senderName || `WhatsApp ${normalizedPhone.slice(-4)}`,
+          phone: normalizedPhone,
+          profile_photo_url: profilePhoto,
+          status: 'lead',
+          origin: 'whatsapp',
+        })
+        .select()
+        .single();
+      
+      if (newPatient) patientId = newPatient.id;
+    }
+
+    // Vincular paciente à conversa
+    if (patientId && !conversation.patient_id) {
+      await supabase
+        .from('whatsapp_conversations')
+        .update({ patient_id: patientId })
+        .eq('id', conversation.id);
+    }
+
+    // 💾 Salvar mensagem
+    const { data: savedMessage, error: msgError } = await supabase
+      .from('whatsapp_messages')
+      .insert({
+        conversation_id: conversation.id,
+        content: messageContent,
+        direction: 'inbound',
+        message_type: messageType,
+        media_url: mediaUrl,
+        wa_message_id: messageId || null,
+        status: 'received',
+      })
+      .select()
+      .single();
+
+    if (msgError) throw msgError;
+
+    return new Response(
+      JSON.stringify({ success: true, conversationId: conversation.id, messageId: savedMessage.id }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error in zapi-webhook:', error);
+    return new Response(
+      JSON.stringify({ error: errorMessage }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+});
+
+
+
+ENVIAR MENSAGENS WHATSAPP
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+interface SendMessageRequest {
+  phone: string;
+  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'location';
+  content?: string;
+  mediaUrl?: string;
+  caption?: string;
+  latitude?: number;
+  longitude?: number;
+  name?: string;
+  address?: string;
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const ZAPI_INSTANCE_ID = Deno.env.get('ZAPI_INSTANCE_ID');
+    const ZAPI_TOKEN = Deno.env.get('ZAPI_TOKEN');
+    const ZAPI_CLIENT_TOKEN = Deno.env.get('ZAPI_CLIENT_TOKEN');
+
+    if (!ZAPI_INSTANCE_ID || !ZAPI_TOKEN || !ZAPI_CLIENT_TOKEN) {
+      return new Response(
+        JSON.stringify({ error: 'Z-API credentials not configured' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const body: SendMessageRequest = await req.json();
+    const { phone, type, content, mediaUrl, caption, latitude, longitude, name, address } = body;
+
+    const normalizedPhone = phone.replace(/\D/g, '');
+    const baseUrl = `https://api.z-api.io/instances/${ZAPI_INSTANCE_ID}/token/${ZAPI_TOKEN}`;
+    
+    let endpoint = '';
+    let payload: Record<string, unknown> = {};
+
+    switch (type) {
+      case 'text':
+        endpoint = '/send-text';
+        payload = { phone: normalizedPhone, message: content };
+        break;
+      case 'image':
+        endpoint = '/send-image';
+        payload = { phone: normalizedPhone, image: mediaUrl, caption: caption || '' };
+        break;
+      case 'video':
+        endpoint = '/send-video';
+        payload = { phone: normalizedPhone, video: mediaUrl, caption: caption || '' };
+        break;
+      case 'audio':
+        endpoint = '/send-audio';
+        payload = { phone: normalizedPhone, audio: mediaUrl };
+        break;
+      case 'document':
+        endpoint = '/send-document';
+        payload = { phone: normalizedPhone, document: mediaUrl, fileName: name || 'document' };
+        break;
+      case 'location':
+        endpoint = '/send-location';
+        payload = { phone: normalizedPhone, latitude, longitude, name: name || '', address: address || '' };
+        break;
+      default:
+        return new Response(
+          JSON.stringify({ error: `Unsupported message type: ${type}` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+    }
+
+    const response = await fetch(`${baseUrl}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Client-Token': ZAPI_CLIENT_TOKEN,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      return new Response(
+        JSON.stringify({ error: 'Failed to send message', details: result }),
+        { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({ success: true, messageId: result.zapiMessageId || result.messageId }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return new Response(
+      JSON.stringify({ error: errorMessage }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+});
+
+
+
+Hook React: Gerenciar Conversas
+
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { useEffect } from 'react';
+
+export type Conversation = {
+  id: string;
+  phone: string;
+  profile_name: string | null;
+  profile_photo_url: string | null;
+  status: string;
+  ai_enabled: boolean;
+  unread_count: number;
+  last_message_at: string | null;
+  patient_id: string | null;
+  patient?: { full_name: string; id: string } | null;
+  last_message?: { content: string; direction: string; message_type: string } | null;
+};
+
+export type Message = {
+  id: string;
+  conversation_id: string;
+  content: string;
+  direction: 'inbound' | 'outbound';
+  message_type: string;
+  media_url: string | null;
+  status: string;
+  created_at: string;
+  sender?: { full_name: string; id: string } | null;
+};
+
+// 📥 Hook: Buscar todas as conversas
+export function useWhatsAppConversations() {
+  const queryClient = useQueryClient();
+
+  const { data: conversations, isLoading, error } = useQuery({
+    queryKey: ['whatsapp-conversations'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('whatsapp_conversations')
+        .select(`
+          *,
+          patient:patients(id, full_name),
+          messages:whatsapp_messages(direction, content, message_type, created_at)
+        `)
+        .order('last_message_at', { ascending: false });
+
+      if (error) throw error;
+      return data as Conversation[];
+    },
+  });
+
+  // 🔴 Realtime: atualizar quando houver mudanças
+  useEffect(() => {
+    const channel = supabase
+      .channel('whatsapp-conversations-realtime')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'whatsapp_conversations',
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
+
+  return { conversations, isLoading, error };
+}
+
+// 📥 Hook: Buscar mensagens de uma conversa
+export function useWhatsAppMessages(conversationId: string | null) {
+  const queryClient = useQueryClient();
+
+  const { data: messages, isLoading, error } = useQuery({
+    queryKey: ['whatsapp-messages', conversationId],
+    queryFn: async () => {
+      if (!conversationId) return [];
+
+      const { data, error } = await supabase
+        .from('whatsapp_messages')
+        .select(`*, sender:profiles!whatsapp_messages_sent_by_fkey(id, full_name)`)
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      return data as Message[];
+    },
+    enabled: !!conversationId,
+  });
+
+  // 🔴 Realtime: atualizar mensagens em tempo real
+  useEffect(() => {
+    if (!conversationId) return;
+
+    const channel = supabase
+      .channel(`whatsapp-messages-${conversationId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'whatsapp_messages',
+        filter: `conversation_id=eq.${conversationId}`,
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['whatsapp-messages', conversationId] });
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [conversationId, queryClient]);
+
+  return { messages, isLoading, error };
+}
+
+// 📤 Hook: Enviar mensagem
+export function useSendMessage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ 
+      conversationId, 
+      phone, 
+      content, 
+      type = 'text',
+      mediaUrl,
+    }: { 
+      conversationId: string; 
+      phone: string; 
+      content: string;
+      type?: string;
+      mediaUrl?: string;
+    }) => {
+      // Salvar no banco
+      const { data: message, error: dbError } = await supabase
+        .from('whatsapp_messages')
+        .insert({
+          conversation_id: conversationId,
+          content,
+          direction: 'outbound',
+          message_type: type,
+          media_url: mediaUrl,
+          status: 'pending',
+        })
+        .select()
+        .single();
+
+      if (dbError) throw dbError;
+
+      // Enviar via Z-API
+      const { error: sendError } = await supabase.functions.invoke('zapi-send-message', {
+        body: { phone, type, content, mediaUrl },
+      });
+
+      if (sendError) {
+        await supabase.from('whatsapp_messages').update({ status: 'failed' }).eq('id', message.id);
+        throw sendError;
+      }
+
+      await supabase.from('whatsapp_messages').update({ status: 'sent' }).eq('id', message.id);
+      return message;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-messages', variables.conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
+    },
+  });
+}
+
+// ✅ Hook: Marcar como lida
+export function useMarkAsRead() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (conversationId: string) => {
+      await supabase
+        .from('whatsapp_conversations')
+        .update({ unread_count: 0 })
+        .eq('id', conversationId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
+    },
+  });
+}
+
+
+ 4. Esquema do Banco de Dados (SQL)
+
+-- Tabela de conversas
+CREATE TABLE whatsapp_conversations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone TEXT NOT NULL UNIQUE,
+  profile_name TEXT,
+  profile_photo_url TEXT,
+  status TEXT DEFAULT 'novo',
+  ai_enabled BOOLEAN DEFAULT true,
+  unread_count INTEGER DEFAULT 0,
+  last_message_at TIMESTAMPTZ,
+  patient_id UUID REFERENCES patients(id),
+  assigned_to UUID REFERENCES profiles(id),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Tabela de mensagens
+CREATE TABLE whatsapp_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID REFERENCES whatsapp_conversations(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
+  message_type TEXT DEFAULT 'text',
+  media_url TEXT,
+  wa_message_id TEXT,
+  status TEXT DEFAULT 'pending',
+  sent_by UUID REFERENCES profiles(id),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Tabela de pacientes/clientes
+CREATE TABLE patients (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  full_name TEXT NOT NULL,
+  phone TEXT UNIQUE,
+  email TEXT,
+  profile_photo_url TEXT,
+  status TEXT DEFAULT 'lead',
+  origin TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Habilitar Realtime
+ALTER PUBLICATION supabase_realtime ADD TABLE whatsapp_conversations;
+ALTER PUBLICATION supabase_realtime ADD TABLE whatsapp_messages;
+

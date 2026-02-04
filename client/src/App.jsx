@@ -41,8 +41,11 @@ function App() {
     const remoteJid = msgData.key.remoteJid || '';
     const number = remoteJid.split('@')[0];
     const isFromMe = msgData.key.fromMe;
-    const pushName = msgData.pushName || number;
     
+    // Try to get name and photo from different possible locations in the payload
+    const pushName = msgData.pushName || msgData.sender?.name || msgData.sender?.pushName || number;
+    const profilePictureUrl = msgData.sender?.profilePictureUrl || msgData.sender?.image || null;
+
     // Determine Message Type & Content
     let text = '';
     let type = 'text';
@@ -89,21 +92,24 @@ function App() {
     // Update Chats List
     setChats((prev) => {
       const existingChatIndex = prev.findIndex(c => c.id === number);
+      // Use existing photo if new one is null
+      const existingPhoto = existingChatIndex >= 0 ? prev[existingChatIndex].avatar : null;
+      
       const newChat = {
         id: number,
         name: pushName,
-        avatar: null, // Could fetch from event if available
+        avatar: profilePictureUrl || existingPhoto, 
         unread: (activeChatId === number) ? 0 : (existingChatIndex >= 0 ? prev[existingChatIndex].unread + 1 : 1),
         lastMessage: type === 'image' ? '📷 Imagem' : (type === 'audio' ? '🎤 Áudio' : text),
         lastMessageTime: newMessage.time
       };
 
       if (existingChatIndex >= 0) {
-        const updatedChats = [...prev];
-        updatedChats[existingChatIndex] = { ...updatedChats[existingChatIndex], ...newChat, unread: activeChatId === number ? 0 : updatedChats[existingChatIndex].unread + 1 };
+        const newChats = [...prev];
+        newChats[existingChatIndex] = newChat;
         // Move to top
-        updatedChats.sort((a, b) => (a.id === number ? -1 : 1));
-        return updatedChats;
+        newChats.splice(existingChatIndex, 1);
+        return [newChat, ...newChats];
       } else {
         return [newChat, ...prev];
       }
