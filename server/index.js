@@ -11,6 +11,9 @@ import FormData from 'form-data';
 import fs from 'fs';
 import sqlite3 from 'sqlite3';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 dotenv.config();
 
 // Database Setup
@@ -77,9 +80,6 @@ function saveMessage(messageData) {
     );
 }
 
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const httpServer = createServer(app);
