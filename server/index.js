@@ -34,7 +34,10 @@ const upload = multer({ dest: 'uploads/' });
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
 const PORT = process.env.PORT || 3000;
-const EVOLUTION_URL = process.env.EVOLUTION_URL;
+let EVOLUTION_URL = process.env.EVOLUTION_URL;
+if (EVOLUTION_URL && EVOLUTION_URL.endsWith('/')) {
+    EVOLUTION_URL = EVOLUTION_URL.slice(0, -1);
+}
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
 const INSTANCE_NAME = process.env.INSTANCE_NAME || 'kairo2';
 
