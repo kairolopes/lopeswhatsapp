@@ -320,6 +320,57 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
     }
 });
 
+// Proxy for Fetch Profile
+app.post('/chat/fetchProfile/:instance', async (req, res) => {
+    try {
+        const { instance } = req.params;
+        const { number } = req.body;
+        
+        // Use configured instance if provided instance is different (optional safety)
+        const targetInstance = instance || INSTANCE_NAME;
+        
+        const url = `${EVOLUTION_URL}/chat/fetchProfile/${targetInstance}`;
+        console.log(`Fetching profile for ${number} from ${url}`);
+        
+        const response = await axios.post(url, { number }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': EVOLUTION_API_KEY
+            }
+        });
+        
+        res.json(response.data);
+    } catch (error) {
+        console.error('Error fetching profile:', error.message);
+        res.status(error.response?.status || 500).json(error.response?.data || { error: 'Failed to fetch profile' });
+    }
+});
+
+// Proxy for Fetch Profile Picture URL
+app.post('/chat/fetchProfilePictureUrl/:instance', async (req, res) => {
+    try {
+        const { instance } = req.params;
+        const { number } = req.body;
+        
+        const targetInstance = instance || INSTANCE_NAME;
+        
+        const url = `${EVOLUTION_URL}/chat/fetchProfilePictureUrl/${targetInstance}`;
+        console.log(`Fetching profile picture for ${number} from ${url}`);
+        
+        const response = await axios.post(url, { number }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': EVOLUTION_API_KEY
+            }
+        });
+        
+        res.json(response.data);
+    } catch (error) {
+        console.error('Error fetching profile picture:', error.message);
+        res.status(error.response?.status || 500).json(error.response?.data || { error: 'Failed to fetch profile picture' });
+    }
+});
+
 // The "catchall" handler
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/dist/index.html'));

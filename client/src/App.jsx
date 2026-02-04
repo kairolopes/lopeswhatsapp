@@ -42,7 +42,7 @@ function App() {
     };
   }, [activeChatId]); // Re-subscribe when activeChatId changes to ensure fresh closure
 
-  const handleIncomingMessage = (event) => {
+  const handleIncomingMessage = async (event) => {
     // Defensive payload check: support both event.data and event directly
     // Also handle array updates (like contacts.update)
     let msgData = event?.data || event;
@@ -73,8 +73,37 @@ function App() {
     const isFromMe = msgData.key.fromMe;
     
     // Try to get name and photo from different possible locations in the payload
-    const pushName = msgData.pushName || msgData.sender?.name || msgData.sender?.pushName || number;
-    const profilePictureUrl = msgData.sender?.profilePictureUrl || msgData.sender?.image || null;
+    let pushName = msgData.pushName || msgData.sender?.name || msgData.sender?.pushName || number;
+    let profilePictureUrl = msgData.sender?.profilePictureUrl || msgData.sender?.image || null;
+
+    // FETCH PROFILE ENRICHMENT
+    // If we don't have a picture or if the name is just the number, try to fetch from API
+    // We only do this for incoming messages to avoid spamming on self-messages, 
+    // though for a real app we might want it for everyone.
+    if (!isFromMe) {
+        try {
+            // Check if we already have this chat and if it has a photo
+            const existingChat = chats.find(c => c.id === number);
+            
+            // Fetch if:
+            // 1. It's a new chat
+            // 2. OR existing chat has no avatar
+            // 3. OR name is just the number
+            if (!existingChat || !existingChat.avatar || existingChat.name === number) {
+                console.log(`Fetching profile for ${number}...`);
+                // Use 'kairo2' or default instance. Ideally this should be dynamic or env based
+                // For now we assume the server route handles the instance mapping or we pass a placeholder
+                const res = await axios.post(`/chat/fetchProfile/kairo2`, { number });
+                
+                if (res.data) {
+                    if (res.data.name) pushName = res.data.name;
+                    if (res.data.picture) profilePictureUrl = res.data.picture;
+                }
+            }
+        } catch (err) {
+            console.error('Error fetching profile enrichment:', err);
+        }
+    }
 
     // Determine Message Type & Content
     let text = '';
