@@ -1,55 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import io from 'socket.io-client';
-import { Send, Menu, Phone, Video, Search } from 'lucide-react';
 import axios from 'axios';
+import { Sidebar } from './components/Sidebar';
+import { ChatWindow } from './components/ChatWindow';
 
-// Connect to backend (automatically detects host in production)
 const socket = io();
 
 function App() {
-  const [messages, setMessages] = useState([]);
-  const [inputText, setInputText] = useState('');
-  const [targetNumber, setTargetNumber] = useState(''); // State for destination number
   const [status, setStatus] = useState('Disconnected');
+  const [activeChatId, setActiveChatId] = useState(null);
+  
+  // State for Chats (Contacts)
+  // Format: { id: string (number), name: string, avatar: string, unread: number, lastMessage: string, lastMessageTime: string }
+  const [chats, setChats] = useState([]);
+
+  // State for Messages
+  // Format: { [chatId]: Array<Message> }
+  const [messages, setMessages] = useState({});
 
   useEffect(() => {
-    socket.on('connect', () => {
-      console.log('Socket Connected');
-      setStatus('Connected');
-    });
-
-    socket.on('disconnect', () => {
-      console.log('Socket Disconnected');
-      setStatus('Disconnected');
-    });
+    socket.on('connect', () => setStatus('Connected'));
+    socket.on('disconnect', () => setStatus('Disconnected'));
 
     socket.on('webhook_event', (event) => {
-      console.log('New Event:', event);
-
-      // Basic parsing for Evolution API "messages.upsert"
-      // This path depends on the exact JSON structure Evolution sends
-      const msgData = event?.data;
-      if (msgData && msgData.key && !msgData.key.fromMe) {
-        const remoteJid = msgData.key.remoteJid || '';
-        const number = remoteJid.split('@')[0];
-
-        // Extract text message (supports simple text and extended text)
-        let text = '';
-        if (msgData.message?.conversation) {
-          text = msgData.message.conversation;
-        } else if (msgData.message?.extendedTextMessage?.text) {
-          text = msgData.message.extendedTextMessage.text;
-        }
-
-        if (text) {
-          setMessages(prev => [...prev, {
-            type: 'in',
-            text: text,
-            time: new Date().toLocaleTimeString(),
-            sender: number
-          }]);
-        }
-      }
+      console.log('Received Event:', event);
+      handleIncomingMessage(event);
     });
 
     return () => {
@@ -57,124 +32,146 @@ function App() {
       socket.off('disconnect');
       socket.off('webhook_event');
     };
-  }, []);
+  }, [chats, messages]); // Dependencies might need tuning to avoid stale closures if using callbacks, but functional updates are better.
 
-  const handleSend = async () => {
-    if (!inputText.trim()) return;
-    if (!targetNumber) {
-      alert('Por favor, digite o número de telefone de destino (ex: 5511999999999)');
-      return;
+  const handleIncomingMessage = (event) => {
+    const msgData = event?.data;
+    if (!msgData || !msgData.key) return;
+
+    const remoteJid = msgData.key.remoteJid || '';
+    const number = remoteJid.split('@')[0];
+    const isFromMe = msgData.key.fromMe;
+    const pushName = msgData.pushName || number;
+    
+    // Determine Message Type & Content
+    let text = '';
+    let type = 'text';
+    let mediaUrl = '';
+
+    if (msgData.message?.conversation) {
+      text = msgData.message.conversation;
+    } else if (msgData.message?.extendedTextMessage?.text) {
+      text = msgData.message.extendedTextMessage.text;
+    } else if (msgData.message?.imageMessage) {
+      type = 'image';
+      text = msgData.message.imageMessage.caption || 'Imagem';
+      // In a real app, you'd need to download/decrypt the media. 
+      // Evolution might provide a URL or base64 if configured, or you fetch it.
+      // For now we use a placeholder or check if url is present.
+      mediaUrl = msgData.message.imageMessage.url || ''; 
+    } else if (msgData.message?.audioMessage) {
+      type = 'audio';
+      text = 'Áudio';
+      mediaUrl = msgData.message.audioMessage.url || '';
     }
 
+    if (!text && !mediaUrl) return; // Unknown message type
+
+    const newMessage = {
+      type: isFromMe ? 'out' : 'in', // simplify direction
+      msgType: type, // text, image, audio
+      text: text,
+      mediaUrl: mediaUrl,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      sender: number,
+      pushName: pushName
+    };
+
+    // Update Messages
+    setMessages((prev) => {
+      const chatMessages = prev[number] || [];
+      return {
+        ...prev,
+        [number]: [...chatMessages, newMessage]
+      };
+    });
+
+    // Update Chats List
+    setChats((prev) => {
+      const existingChatIndex = prev.findIndex(c => c.id === number);
+      const newChat = {
+        id: number,
+        name: pushName,
+        avatar: null, // Could fetch from event if available
+        unread: (activeChatId === number) ? 0 : (existingChatIndex >= 0 ? prev[existingChatIndex].unread + 1 : 1),
+        lastMessage: type === 'image' ? '📷 Imagem' : (type === 'audio' ? '🎤 Áudio' : text),
+        lastMessageTime: newMessage.time
+      };
+
+      if (existingChatIndex >= 0) {
+        const updatedChats = [...prev];
+        updatedChats[existingChatIndex] = { ...updatedChats[existingChatIndex], ...newChat, unread: activeChatId === number ? 0 : updatedChats[existingChatIndex].unread + 1 };
+        // Move to top
+        updatedChats.sort((a, b) => (a.id === number ? -1 : 1));
+        return updatedChats;
+      } else {
+        return [newChat, ...prev];
+      }
+    });
+  };
+
+  const handleSendMessage = async (text) => {
+    if (!activeChatId) return;
+
     try {
-      // Optimistic update
-      setMessages([...messages, { type: 'out', text: inputText, time: new Date().toLocaleTimeString() }]);
+      const newMessage = {
+        type: 'out',
+        msgType: 'text',
+        text: text,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
 
-      // Sending to backend -> Evolution
-      // ensure number format involved if needed, usually Evolution expects full number (55...)
+      // Optimistic Update
+      setMessages(prev => ({
+        ...prev,
+        [activeChatId]: [...(prev[activeChatId] || []), newMessage]
+      }));
+
+      // Update Last Message in Sidebar
+      setChats(prev => prev.map(c => 
+        c.id === activeChatId 
+          ? { ...c, lastMessage: text, lastMessageTime: newMessage.time } 
+          : c
+      ));
+
       await axios.post('/api/send-message', {
-        number: targetNumber,
-        text: inputText
+        number: activeChatId,
+        text: text
       });
-
-      setInputText('');
     } catch (error) {
-      console.error('Send failed', error);
-      alert('Erro ao enviar mensagem. Verifique o console.');
+      console.error('Failed to send', error);
+      alert('Erro ao enviar mensagem');
     }
   };
 
+  const handleSendMedia = async (file) => {
+    // Placeholder for media sending logic
+    // You would upload the file to a server, get a URL, then send to Evolution
+    alert("Envio de mídia ainda não implementado no backend de exemplo.");
+  };
+
+  const activeChat = chats.find(c => c.id === activeChatId);
+
   return (
-    <div className="flex h-screen bg-gray-100 overflow-hidden">
-      {/* Sidebar */}
-      <div className="w-[400px] bg-white border-r border-gray-300 flex flex-col">
-        {/* Header */}
-        <div className="h-[60px] bg-gray-100 flex items-center justify-between px-4 border-b border-gray-300">
-          <div className="w-10 h-10 rounded-full bg-gray-300"></div>
-          <div className="flex gap-4 text-gray-600">
-            <div className='text-xs flex flex-col items-end'>
-              <span>{status}</span>
-            </div>
-            <Menu className="w-6 h-6" />
-          </div>
-        </div>
-        {/* Search */}
-        <div className="p-2 border-b border-gray-200">
-          <div className="bg-gray-100 rounded-lg flex items-center px-4 py-2">
-            <Search className="w-5 h-5 text-gray-500" />
-            <input type="text" placeholder="Pesquisar ou começar uma nova conversa" className="bg-transparent ml-4 outline-none w-full text-sm" />
-          </div>
-        </div>
-        {/* Chat List */}
-        <div className="flex-1 overflow-y-auto">
-          {['João da Silva', 'Maria Loja', 'Suporte TI'].map((name, i) => (
-            <div key={i} className="flex items-center p-3 hover:bg-gray-100 cursor-pointer border-b border-gray-100">
-              <div className="w-12 h-12 rounded-full bg-gray-300 mr-4"></div>
-              <div className="flex-1">
-                <div className="flex justify-between">
-                  <span className="font-semibold text-gray-800">{name}</span>
-                  <span className="text-xs text-gray-500">14:02</span>
-                </div>
-                <p className="text-sm text-gray-500 truncate">Olá, tudo bem?</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+    <div className="flex h-screen overflow-hidden bg-[#eef1f4]">
+      {/* Sidebar - Hidden on mobile if chat is active */}
+      <Sidebar 
+        chats={chats} 
+        activeChatId={activeChatId} 
+        onSelectChat={(id) => setActiveChatId(id)}
+        className={activeChatId ? "hidden md:flex w-full md:w-[400px]" : "flex w-full md:w-[400px]"}
+      />
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col bg-chat-image relative">
-        {/* Chat Header */}
-        <div className="h-[60px] bg-gray-100 flex items-center justify-between px-4 border-b border-gray-300 z-10 w-full">
-          <div className="flex items-center">
-            <div className="w-10 h-10 rounded-full bg-gray-300 mr-4"></div>
-            <div>
-              <h2 className="font-semibold text-gray-800">Chat de Teste</h2>
-              {/* Temporary Input for Number */}
-              <input
-                type="text"
-                placeholder="Número (55...)"
-                value={targetNumber}
-                onChange={(e) => setTargetNumber(e.target.value)}
-                className="text-xs border rounded px-1 ml-2"
-              />
-            </div>
-          </div>
-          <div className="flex gap-6 text-gray-600">
-            <Search className="w-6 h-6" />
-            <Menu className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-8 bg-[#efeae2] space-y-4">
-          <div className="max-w-[60%] bg-white p-2 rounded-lg shadow-sm self-start rounded-tl-none">
-            <p className="text-sm text-gray-800">Olá! Coloque o número de destino lá em cima para testar.</p>
-            <span className="text-[10px] text-gray-500 float-right mt-1 ml-2">10:00</span>
-          </div>
-
-          {messages.map((msg, idx) => (
-            <div key={idx} className={`max-w-[60%] p-2 rounded-lg shadow-sm ${msg.type === 'out' ? 'bg-[#d9fdd3] self-end ml-auto rounded-tr-none' : 'bg-white self-start rounded-tl-none'}`}>
-              <p className="text-sm text-gray-800">{msg.text}</p>
-              <span className="text-[10px] text-gray-500 float-right mt-1 ml-2">{msg.time}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Input Area */}
-        <div className="h-[70px] bg-gray-100 flex items-center px-4 gap-4">
-          <input
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            type="text"
-            placeholder="Digite uma mensagem"
-            className="flex-1 bg-white rounded-lg p-3 outline-none text-sm"
-          />
-          <button onClick={handleSend} className="text-gray-600 hover:text-gray-800">
-            <Send className="w-6 h-6" />
-          </button>
-        </div>
+      {/* Chat Window - Hidden on mobile if no chat active */}
+      <div className={activeChatId ? "flex-1 flex" : "hidden md:flex flex-1"}>
+         <ChatWindow 
+           chat={activeChat}
+           messages={activeChatId ? (messages[activeChatId] || []) : []}
+           onBack={() => setActiveChatId(null)}
+           onSend={handleSendMessage}
+           onSendMedia={handleSendMedia}
+           className="w-full h-full"
+         />
       </div>
     </div>
   );
