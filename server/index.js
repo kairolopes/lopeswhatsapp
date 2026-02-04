@@ -494,7 +494,10 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
              formData.append('mediatype', 'image'); // Default to image, could be video
              formData.append('mimetype', file.mimetype);
              if (caption) formData.append('caption', caption);
-             formData.append('attachment', fs.createReadStream(file.path)); // Changed to 'attachment' for compatibility
+             // Append both common field names for broader API compatibility
+             const stream = fs.createReadStream(file.path);
+             formData.append('attachment', stream);
+             formData.append('file', fs.createReadStream(file.path));
         }
 
         console.log(`Target URL: ${url}`); 
@@ -572,6 +575,23 @@ app.post('/chat/fetchProfile/:instance', async (req, res) => {
                 'apikey': EVOLUTION_API_KEY
             }
         });
+        
+        // Persist basic contact info to local DB
+        try {
+            const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+            const name = response.data?.name || number;
+            const picture = response.data?.picture || response.data?.profilePictureUrl || null;
+            db.run(`INSERT OR IGNORE INTO chats (remoteJid, name, lastMessageTimestamp) VALUES (?, ?, ?)`, 
+                [remoteJid, name, Date.now()]);
+            if (picture) {
+                db.run(`UPDATE chats SET name = ?, profilePictureUrl = ? WHERE remoteJid = ?`, 
+                    [name, picture, remoteJid]);
+            } else {
+                db.run(`UPDATE chats SET name = ? WHERE remoteJid = ?`, [name, remoteJid]);
+            }
+        } catch (e) {
+            console.error('Persist profile failed:', e.message);
+        }
         
         res.json(response.data);
     } catch (error) {

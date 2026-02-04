@@ -49,6 +49,7 @@ function App() {
         try {
             const res = await axios.get(`/api/messages/${activeChatId}`);
             const formattedMessages = res.data.map(m => ({
+                id: m.id,
                 type: m.fromMe ? 'out' : 'in',
                 msgType: m.type === 'imageMessage' ? 'image' : (m.type === 'audioMessage' ? 'audio' : 'text'),
                 text: m.content, // Content handling depends on type, simplfied here
@@ -128,6 +129,7 @@ function App() {
     const remoteJid = msgData.key.remoteJid || '';
     const number = remoteJid.split('@')[0];
     const isFromMe = msgData.key.fromMe;
+    const msgId = msgData.key.id;
     
     // Try to get name and photo from different possible locations in the payload
     let pushName = msgData.pushName || msgData.sender?.name || msgData.sender?.pushName || number;
@@ -207,6 +209,7 @@ function App() {
     if (!text && !mediaUrl) return; // Unknown message type
 
     const newMessage = {
+      id: msgId,
       type: isFromMe ? 'out' : 'in', // simplify direction
       msgType: type, // text, image, audio
       text: text,
@@ -218,24 +221,33 @@ function App() {
 
     // Update Messages
     setMessages((prev) => {
-      const chatMessages = prev[number] || [];
-      return {
-        ...prev,
-        [number]: [...chatMessages, newMessage]
-      };
+      const chatMessages = prev[remoteJid] || [];
+      // Dedup by id
+      if (msgId && chatMessages.some(m => m.id === msgId)) return prev;
+      // If optimistic pending exists for outgoing message, replace it
+      let replaced = false;
+      const updated = chatMessages.map(m => {
+        if (!replaced && m.type === 'out' && (!m.id || String(m.id).startsWith('PENDING')) && isFromMe) {
+          replaced = true;
+          return newMessage;
+        }
+        return m;
+      });
+      const finalList = replaced ? updated : [...chatMessages, newMessage];
+      return { ...prev, [remoteJid]: finalList };
     });
 
     // Update Chats List
     setChats((prev) => {
-      const existingChatIndex = prev.findIndex(c => c.id === number);
+      const existingChatIndex = prev.findIndex(c => c.id === remoteJid);
       // Use existing photo if new one is null
       const existingPhoto = existingChatIndex >= 0 ? prev[existingChatIndex].avatar : null;
       
       const newChat = {
-        id: number,
+        id: remoteJid,
         name: pushName,
         avatar: profilePictureUrl || existingPhoto, 
-        unread: (activeChatId === number) ? 0 : (existingChatIndex >= 0 ? prev[existingChatIndex].unread + 1 : 1),
+        unread: (activeChatId === remoteJid) ? 0 : (existingChatIndex >= 0 ? prev[existingChatIndex].unread + 1 : 1),
         lastMessage: type === 'image' ? '📷 Imagem' : (type === 'audio' ? '🎤 Áudio' : text),
         lastMessageTime: newMessage.time
       };
@@ -256,7 +268,9 @@ function App() {
     if (!activeChatId) return;
 
     try {
+      const pendingId = 'PENDING:' + Date.now();
       const newMessage = {
+        id: pendingId,
         type: 'out',
         msgType: 'text',
         text: text,
@@ -276,10 +290,19 @@ function App() {
           : c
       ));
 
-      await axios.post('/api/send-message', {
+      const res = await axios.post('/api/send-message', {
         number: activeChatId,
         text: text
       });
+      // Reconcile optimistic with real ID if available
+      const realId = res?.data?.key?.id;
+      if (realId) {
+        setMessages(prev => {
+          const chatMessages = prev[activeChatId] || [];
+          const updated = chatMessages.map(m => (m.id === pendingId ? { ...m, id: realId } : m));
+          return { ...prev, [activeChatId]: updated };
+        });
+      }
     } catch (error) {
       console.error('Failed to send', error);
       alert('Erro ao enviar mensagem');
@@ -293,7 +316,9 @@ function App() {
         const type = file.type.startsWith('audio') ? 'audio' : 'image';
         const tempUrl = URL.createObjectURL(file); // Temporary preview
 
+        const pendingId = 'PENDING:' + Date.now();
         const newMessage = {
+            id: pendingId,
             type: 'out',
             msgType: type,
             text: type === 'image' ? 'Imagem' : 'Áudio',
@@ -320,11 +345,19 @@ function App() {
         formData.append('type', type);
         // caption support could be added here
         
-        await axios.post('/api/send-media', formData, {
+        const res = await axios.post('/api/send-media', formData, {
             headers: {
                 'Content-Type': 'multipart/form-data'
             }
         });
+        const realId = res?.data?.key?.id;
+        if (realId) {
+            setMessages(prev => {
+                const chatMessages = prev[activeChatId] || [];
+                const updated = chatMessages.map(m => (m.id === pendingId ? { ...m, id: realId } : m));
+                return { ...prev, [activeChatId]: updated };
+            });
+        }
 
     } catch (error) {
         console.error('Failed to send media', error);
