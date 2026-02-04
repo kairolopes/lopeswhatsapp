@@ -10,6 +10,7 @@ export const ChatWindow = ({
   onBack, 
   onSend,
   onSendMedia,
+  onHeaderClick,
   className 
 }) => {
   const messagesEndRef = useRef(null);
@@ -34,14 +35,17 @@ export const ChatWindow = ({
   return (
     <div className={cn("flex flex-col h-full bg-[#efeae2]", className)}>
       {/* Header */}
-      <div className="h-[60px] bg-[#f0f2f5] px-4 flex items-center justify-between shrink-0 border-b border-gray-300">
+      <div 
+        onClick={onHeaderClick}
+        className="h-[60px] bg-[#f0f2f5] px-4 flex items-center justify-between shrink-0 border-b border-gray-300 cursor-pointer hover:bg-gray-50 transition-colors"
+      >
          <div className="flex items-center gap-3">
             {/* Back button for mobile */}
-            <button onClick={onBack} className="md:hidden text-gray-600">
+            <button onClick={(e) => { e.stopPropagation(); onBack(); }} className="md:hidden text-gray-600">
                <ArrowLeft size={24} />
             </button>
             
-            <div className="w-10 h-10 rounded-full overflow-hidden cursor-pointer">
+            <div className="w-10 h-10 rounded-full overflow-hidden">
                <img 
                  src={chat.avatar || `https://ui-avatars.com/api/?name=${chat.name || chat.id}&background=random`} 
                  alt={chat.name} 
@@ -49,12 +53,12 @@ export const ChatWindow = ({
                />
             </div>
             
-            <div className="flex flex-col justify-center cursor-pointer">
+            <div className="flex flex-col justify-center">
                <h3 className="text-gray-900 font-medium leading-tight">
                  {chat.name || chat.id}
                </h3>
                <span className="text-xs text-gray-500 truncate">
-                 visto por último hoje às 10:30
+                 clique para dados do contato
                </span>
             </div>
          </div>

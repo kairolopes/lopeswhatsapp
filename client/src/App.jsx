@@ -97,7 +97,12 @@ function App() {
                 
                 if (res.data) {
                     if (res.data.name) pushName = res.data.name;
-                    if (res.data.picture) profilePictureUrl = res.data.picture;
+                    // Fallback to profilePictureUrl if picture is not present
+                    if (res.data.picture) {
+                        profilePictureUrl = res.data.picture;
+                    } else if (res.data.profilePictureUrl) {
+                        profilePictureUrl = res.data.profilePictureUrl;
+                    }
                 }
             }
         } catch (err) {
@@ -271,6 +276,7 @@ function App() {
   };
 
   const activeChat = chats.find(c => c.id === activeChatId);
+  const [showProfileInfo, setShowProfileInfo] = useState(false);
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#eef1f4]">
@@ -278,7 +284,7 @@ function App() {
       <Sidebar 
         chats={chats} 
         activeChatId={activeChatId} 
-        onSelectChat={(id) => setActiveChatId(id)}
+        onSelectChat={(id) => { setActiveChatId(id); setShowProfileInfo(false); }}
         className={activeChatId ? "hidden md:flex w-full md:w-[400px]" : "flex w-full md:w-[400px]"}
       />
 
@@ -321,14 +327,45 @@ function App() {
             )}
          </div>
 
-         <ChatWindow 
-           chat={activeChat}
-           messages={activeChatId ? (messages[activeChatId] || []) : []}
-           onBack={() => setActiveChatId(null)}
-           onSend={handleSendMessage}
-           onSendMedia={handleSendMedia}
-           className="w-full h-full"
-         />
+         <div className="flex flex-1 h-full overflow-hidden">
+            <ChatWindow 
+              chat={activeChat}
+              messages={activeChatId ? (messages[activeChatId] || []) : []}
+              onBack={() => setActiveChatId(null)}
+              onSend={handleSendMessage}
+              onSendMedia={handleSendMedia}
+              onHeaderClick={() => setShowProfileInfo(!showProfileInfo)}
+              className="flex-1 h-full"
+            />
+            
+            {/* Profile Info Sidebar */}
+            {showProfileInfo && activeChat && (
+                <div className="w-[300px] bg-white border-l border-gray-200 flex flex-col h-full animate-in slide-in-from-right duration-300">
+                    <div className="h-[60px] bg-[#f0f2f5] px-4 flex items-center gap-4 border-b border-gray-300">
+                        <button onClick={() => setShowProfileInfo(false)} className="text-gray-600">
+                           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                        <span className="font-medium text-gray-700">Dados do contato</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center bg-[#efeae2]">
+                        <div className="w-48 h-48 rounded-full overflow-hidden mb-4 shadow-lg bg-white">
+                             <img 
+                               src={activeChat.avatar || `https://ui-avatars.com/api/?name=${activeChat.name || activeChat.id}&background=random`} 
+                               alt={activeChat.name} 
+                               className="w-full h-full object-cover"
+                             />
+                        </div>
+                        <h2 className="text-xl font-medium text-gray-900 mb-1">{activeChat.name}</h2>
+                        <p className="text-gray-500 mb-6">{activeChat.id}</p>
+                        
+                        <div className="w-full bg-white p-4 rounded shadow-sm">
+                            <h3 className="text-sm text-green-600 font-medium mb-1">Recado</h3>
+                            <p className="text-gray-800">Disponível</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+         </div>
       </div>
     </div>
   );
