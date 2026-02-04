@@ -262,6 +262,14 @@ function App() {
                 <div className={`w-2 h-2 rounded-full ${status === 'Connected' ? 'bg-white' : 'bg-white animate-pulse'}`}></div>
                 {status}
             </div>
+            
+            <button 
+                onClick={() => axios.get('/api/simulate-webhook')}
+                className="mt-2 px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 pointer-events-auto"
+            >
+                Simular Recebimento
+            </button>
+
             {lastDebugEvent && (
                 <div className="mt-1 bg-black/80 text-green-400 text-[10px] p-2 rounded max-w-[200px] max-h-[100px] overflow-auto pointer-events-auto">
                     <div className="font-bold border-b border-green-900 mb-1">Last Webhook:</div>
