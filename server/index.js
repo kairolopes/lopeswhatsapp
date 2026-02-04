@@ -143,16 +143,6 @@ app.post('/api/send-message', async (req, res) => {
     });
   }
 });
-    
-    if (error.response?.status === 401) {
-        console.error('CRITICAL: 401 Unauthorized. Verify EVOLUTION_API_KEY in Render Environment Variables.');
-    }
-    res.status(error.response?.status || 500).json({ 
-        error: 'Failed to send message', 
-        details: error.response?.data || error.message 
-    });
-  }
-});
 
 // Proxy Endpoint to send MEDIA (Image/Audio)
 app.post('/api/send-media', upload.single('file'), async (req, res) => {
