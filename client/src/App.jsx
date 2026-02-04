@@ -270,6 +270,20 @@ function App() {
                 Simular Recebimento
             </button>
 
+            <button 
+                onClick={async () => {
+                    try {
+                        const res = await axios.get('/api/debug/last-webhook');
+                        setLastDebugEvent(JSON.stringify(res.data, null, 2));
+                    } catch (e) {
+                        alert('Erro ao buscar log: ' + e.message);
+                    }
+                }}
+                className="mt-2 px-2 py-1 bg-purple-600 text-white text-xs rounded hover:bg-purple-700 pointer-events-auto"
+            >
+                Verificar Webhook Real
+            </button>
+
             {lastDebugEvent && (
                 <div className="mt-1 bg-black/80 text-green-400 text-[10px] p-2 rounded max-w-[200px] max-h-[100px] overflow-auto pointer-events-auto">
                     <div className="font-bold border-b border-green-900 mb-1">Last Webhook:</div>

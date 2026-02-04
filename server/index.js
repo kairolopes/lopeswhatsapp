@@ -57,6 +57,9 @@ console.log('EVOLUTION_API_KEY:', EVOLUTION_API_KEY ? `******${EVOLUTION_API_KEY
 console.log('INSTANCE_NAME:', INSTANCE_NAME);
 console.log('---------------------');
 
+// Global variable to store last webhook for debugging
+let lastWebhookData = null;
+
 // Webhook Endpoint
 app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
   console.log('--- Incoming Webhook ---');
@@ -65,16 +68,41 @@ app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
   console.log('------------------------');
 
   const event = req.body;
+  lastWebhookData = {
+      timestamp: new Date().toISOString(),
+      url: req.url,
+      body: event,
+      valid_instance: true
+  };
+  
   io.emit('webhook_event', event);
   res.status(200).send('OK');
 });
 
-// Wildcard Webhook Debugger (catch wrong instance names)
+// Permissive Wildcard Webhook (catch wrong instance names but still process)
 app.post('/webhook/*', (req, res) => {
     console.log('--- RECEIVED WEBHOOK ON WRONG ENDPOINT ---');
     console.log('URL:', req.url);
     console.log('Body:', JSON.stringify(req.body, null, 2));
-    res.status(404).send('Wrong Instance Name configured');
+    
+    const event = req.body;
+    lastWebhookData = {
+        timestamp: new Date().toISOString(),
+        url: req.url,
+        body: event,
+        valid_instance: false,
+        warning: 'Received on wrong instance endpoint'
+    };
+
+    // Emit anyway so it works even with typo
+    io.emit('webhook_event', event);
+    
+    res.status(200).send('OK (Permissive Mode)');
+});
+
+// Debug Endpoint to get last received webhook
+app.get('/api/debug/last-webhook', (req, res) => {
+    res.json(lastWebhookData || { message: 'No webhook received yet since server restart' });
 });
 
 // Test Webhook Simulation
