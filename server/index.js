@@ -115,15 +115,9 @@ app.post('/api/send-message', async (req, res) => {
 
     const response = await axios.post(url, {
       number,
-      text, // Evolution API v2 often expects 'text' at root
-      options: {
-        delay: 1200,
-        presence: "composing",
-        linkPreview: false
-      },
-      textMessage: {
-        text
-      }
+      text,
+      delay: 1200,
+      linkPreview: false
     }, { headers });
 
     res.json(response.data);
@@ -173,7 +167,7 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
              formData.append('mediatype', 'image'); // Default to image, could be video
              formData.append('mimetype', file.mimetype);
              if (caption) formData.append('caption', caption);
-             formData.append('file', fs.createReadStream(file.path)); // Changed from 'attachment' to 'file'
+             formData.append('attachment', fs.createReadStream(file.path)); // Changed to 'attachment' for compatibility
         }
 
         console.log(`Target URL: ${url}`); 
