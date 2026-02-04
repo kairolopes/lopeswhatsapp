@@ -94,7 +94,9 @@ app.post('/api/send-message', async (req, res) => {
 
     res.json(response.data);
     } catch (error) {
-    console.error(`Error sending message to ${url}`);
+    // Only access url if it was defined
+    const targetUrl = typeof url !== 'undefined' ? url : 'unknown';
+    console.error(`Error sending message to ${targetUrl}`);
     console.error('Status:', error.response?.status);
     console.error('Response Data:', JSON.stringify(error.response?.data || {}, null, 2));
     
