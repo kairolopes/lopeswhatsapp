@@ -6,6 +6,9 @@ import { Server } from 'socket.io';
 import axios from 'axios';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import multer from 'multer';
+import FormData from 'form-data';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -24,40 +27,50 @@ const io = new Server(httpServer, {
 app.use(cors());
 app.use(express.json());
 
+// Configure Multer for temp uploads
+const upload = multer({ dest: 'uploads/' });
+
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
 const PORT = process.env.PORT || 3000;
 const EVOLUTION_URL = process.env.EVOLUTION_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
+const INSTANCE_NAME = process.env.INSTANCE_NAME || 'kairo2';
+
+// Check config on startup
+console.log('--- Server Config ---');
+console.log('PORT:', PORT);
+console.log('EVOLUTION_URL:', EVOLUTION_URL ? EVOLUTION_URL : 'MISSING');
+console.log('EVOLUTION_API_KEY:', EVOLUTION_API_KEY ? '******' + EVOLUTION_API_KEY.slice(-4) : 'MISSING');
+console.log('INSTANCE_NAME:', INSTANCE_NAME);
+console.log('---------------------');
 
 // Webhook Endpoint
-// Evolution API often sends webhooks to /webhook/{instanceName}
-app.post('/webhook/kairo2', (req, res) => {
+app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
   console.log('Webhook Header:', req.headers);
   console.log('Webhook Body:', JSON.stringify(req.body, null, 2));
 
   const event = req.body;
-
-  // Broadcast event to frontend via Socket.io
   io.emit('webhook_event', event);
-
   res.status(200).send('OK');
 });
 
-// Proxy Endpoint to send messages
+// Proxy Endpoint to send TEXT messages
 app.post('/api/send-message', async (req, res) => {
   try {
     const { number, text } = req.body;
     if (!number || !text) return res.status(400).json({ error: 'Missing number or text' });
 
-    // Note: Assuming 'InstanceName' usage. Ideally this should be dynamic or env var.
-    // For now, we construct the URL based on user providing the BASE URL.
-    // Documentation says /message/sendText/{instance}
-    // We'll fallback to a default instance name if not provided, or ask user.
-    // For MVP, let's hardcode a placeholder or try to get it from env.
-    const instanceName = process.env.INSTANCE_NAME || 'kairo2';
-    const url = `${EVOLUTION_URL}/message/sendText/${instanceName}`;
+    console.log(`Sending text to ${number}: ${text}`);
+
+    const url = `${EVOLUTION_URL}/message/sendText/${INSTANCE_NAME}`;
+    
+    // Headers for Evolution API
+    const headers = {
+        'Content-Type': 'application/json',
+        'apikey': EVOLUTION_API_KEY
+    };
 
     const response = await axios.post(url, {
       number,
@@ -69,21 +82,70 @@ app.post('/api/send-message', async (req, res) => {
       textMessage: {
         text
       }
-    }, {
-      headers: {
-        apikey: EVOLUTION_API_KEY
-      }
-    });
+    }, { headers });
 
     res.json(response.data);
   } catch (error) {
     console.error('Error sending message:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to send message' });
+    if (error.response?.status === 401) {
+        console.error('CRITICAL: 401 Unauthorized. Check EVOLUTION_API_KEY.');
+    }
+    res.status(error.response?.status || 500).json({ 
+        error: 'Failed to send message', 
+        details: error.response?.data || error.message 
+    });
   }
 });
 
-// The "catchall" handler: for any request that doesn't
-// match one above, send back React's index.html file.
+// Proxy Endpoint to send MEDIA (Image/Audio)
+app.post('/api/send-media', upload.single('file'), async (req, res) => {
+    try {
+        const { number, type, caption } = req.body;
+        const file = req.file;
+
+        if (!number || !file) {
+            return res.status(400).json({ error: 'Missing number or file' });
+        }
+
+        console.log(`Sending media (${type}) to ${number}: ${file.originalname}`);
+
+        // Prepare FormData for Evolution API
+        // Endpoint usually: /message/sendMedia/{instance}
+        // It expects 'number', 'mediatype', 'mimetype', 'caption', 'attachment' (file)
+        
+        const url = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
+        
+        const formData = new FormData();
+        formData.append('number', number);
+        formData.append('mediatype', type === 'audio' ? 'audio' : 'image');
+        // mimetype is handled by fs read stream usually, or we pass explicitly
+        formData.append('mimetype', file.mimetype);
+        if (caption) formData.append('caption', caption);
+        formData.append('attachment', fs.createReadStream(file.path));
+
+        const headers = {
+            ...formData.getHeaders(),
+            'apikey': EVOLUTION_API_KEY
+        };
+
+        const response = await axios.post(url, formData, { headers });
+
+        // Clean up temp file
+        fs.unlinkSync(file.path);
+
+        res.json(response.data);
+    } catch (error) {
+        console.error('Error sending media:', error.response?.data || error.message);
+        if (req.file && req.file.path) fs.unlinkSync(req.file.path); // cleanup on error
+        
+        res.status(error.response?.status || 500).json({ 
+            error: 'Failed to send media', 
+            details: error.response?.data || error.message 
+        });
+    }
+});
+
+// The "catchall" handler
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/dist/index.html'));
 });
