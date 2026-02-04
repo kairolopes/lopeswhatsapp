@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { ArrowLeft, MoreVertical, Search, Phone, Video } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
-import { cn } from '../lib/utils';
+import { cn, formatPhone } from '../lib/utils';
 
 export const ChatWindow = ({ 
   chat, 
@@ -58,7 +58,7 @@ export const ChatWindow = ({
                  {chat.name || chat.id}
                </h3>
                <span className="text-xs text-gray-500 truncate">
-                 {chat.id?.split('@')[0]}
+                 {formatPhone(chat.id)}
                </span>
             </div>
          </div>

@@ -17,7 +17,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config();
 
 // Database Setup
-const dbPath = path.join(__dirname, 'database.sqlite');
+const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.join(__dirname, 'database.sqlite');
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error('Error opening database:', err.message);
@@ -217,52 +217,6 @@ app.post('/webhook/*', (req, res) => {
     // Emit anyway so it works even with typo
     io.emit('webhook_event', event);
 
-    // Persist to database if it's a message
-    if (event.event === 'messages.upsert' && event.data) {
-        try {
-            const msgData = event.data;
-            const remoteJid = msgData.key.remoteJid;
-            const fromMe = msgData.key.fromMe;
-            const id = msgData.key.id;
-            const pushName = msgData.pushName;
-            const timestamp = msgData.messageTimestamp || Date.now();
-            
-            let content = '';
-            let type = msgData.messageType || 'unknown';
-
-            if (msgData.message) {
-                if (msgData.message.conversation) {
-                    content = msgData.message.conversation;
-                    type = 'conversation';
-                } else if (msgData.message.extendedTextMessage) {
-                    content = msgData.message.extendedTextMessage.text;
-                    type = 'extendedTextMessage';
-                } else if (msgData.message.imageMessage) {
-                    content = msgData.message.imageMessage.caption || '[Imagem]';
-                    type = 'imageMessage';
-                } else if (msgData.message.audioMessage) {
-                    content = '[Áudio]';
-                    type = 'audioMessage';
-                } else {
-                    content = JSON.stringify(msgData.message);
-                }
-            }
-
-            saveMessage({
-                id,
-                remoteJid,
-                fromMe,
-                content,
-                type,
-                timestamp: typeof timestamp === 'number' ? timestamp * 1000 : Date.now(), // Evolution timestamp is usually seconds
-                status: 'received',
-                pushName
-            });
-        } catch (e) {
-            console.error('Error processing webhook for DB:', e);
-        }
-    }
-    
     res.status(200).send('OK (Permissive Mode)');
 });
 
@@ -563,11 +517,31 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
             'apikey': EVOLUTION_API_KEY
         };
 
-        const response = await axios.post(url, formData, { 
-            headers,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity
-        });
+        let response;
+        try {
+            response = await axios.post(url, formData, { 
+                headers,
+                maxContentLength: Infinity,
+                maxBodyLength: Infinity
+            });
+        } catch (primaryError) {
+            if (type === 'audio') {
+                try {
+                    const fallbackForm = new FormData();
+                    fallbackForm.append('number', number);
+                    fallbackForm.append('mediatype', 'audio');
+                    fallbackForm.append('mimetype', file.mimetype);
+                    fallbackForm.append('attachment', fs.createReadStream(file.path));
+                    const fbHeaders = { ...fallbackForm.getHeaders(), apikey: EVOLUTION_API_KEY };
+                    const fbUrl = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
+                    response = await axios.post(fbUrl, fallbackForm, { headers: fbHeaders });
+                } catch (fallbackError) {
+                    throw fallbackError;
+                }
+            } else {
+                throw primaryError;
+            }
+        }
 
         // Save sent media to DB
         if (response.data && response.data.key) {

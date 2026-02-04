@@ -3,6 +3,7 @@ import io from 'socket.io-client';
 import axios from 'axios';
 import { Sidebar } from './components/Sidebar';
 import { ChatWindow } from './components/ChatWindow';
+import { formatPhone } from './lib/utils';
 
 const socket = io();
 
@@ -491,7 +492,7 @@ function App() {
                              />
                         </div>
                         <h2 className="text-xl font-medium text-gray-900 mb-1">{activeChat.name}</h2>
-                        <p className="text-gray-500 mb-6">{activeChat.id}</p>
+                        <p className="text-gray-500 mb-6">{formatPhone(activeChat.id)}</p>
                         
                         <div className="w-full bg-white p-4 rounded shadow-sm">
                             <h3 className="text-sm text-green-600 font-medium mb-1">Recado</h3>
