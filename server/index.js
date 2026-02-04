@@ -69,6 +69,39 @@ app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
   res.status(200).send('OK');
 });
 
+// Wildcard Webhook Debugger (catch wrong instance names)
+app.post('/webhook/*', (req, res) => {
+    console.log('--- RECEIVED WEBHOOK ON WRONG ENDPOINT ---');
+    console.log('URL:', req.url);
+    console.log('Body:', JSON.stringify(req.body, null, 2));
+    res.status(404).send('Wrong Instance Name configured');
+});
+
+// Test Webhook Simulation
+app.get('/api/simulate-webhook', (req, res) => {
+    const fakeEvent = {
+        event: "messages.upsert",
+        instance: INSTANCE_NAME,
+        data: {
+            key: {
+                remoteJid: "5511999999999@s.whatsapp.net",
+                fromMe: false,
+                id: "TEST_MSG_" + Date.now()
+            },
+            pushName: "Test User",
+            message: {
+                conversation: "Isto é um teste de recebimento simulado!"
+            },
+            messageType: "conversation"
+        },
+        sender: "5511999999999@s.whatsapp.net"
+    };
+    
+    console.log('Simulating Webhook Event...');
+    io.emit('webhook_event', fakeEvent);
+    res.json({ success: true, message: 'Simulated event emitted', payload: fakeEvent });
+});
+
 // Test Connection Endpoint
 app.get('/api/test-connection', async (req, res) => {
     try {
