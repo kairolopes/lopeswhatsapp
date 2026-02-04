@@ -32,11 +32,15 @@ function App() {
       socket.off('disconnect');
       socket.off('webhook_event');
     };
-  }, [chats, messages]); // Dependencies might need tuning to avoid stale closures if using callbacks, but functional updates are better.
+  }, [activeChatId]); // Re-subscribe when activeChatId changes to ensure fresh closure
 
   const handleIncomingMessage = (event) => {
-    const msgData = event?.data;
-    if (!msgData || !msgData.key) return;
+    // Defensive payload check: support both event.data and event directly
+    const msgData = event?.data || event;
+    if (!msgData || !msgData.key) {
+        console.warn('Invalid message format:', msgData);
+        return;
+    }
 
     const remoteJid = msgData.key.remoteJid || '';
     const number = remoteJid.split('@')[0];

@@ -28,6 +28,10 @@ app.use(cors());
 app.use(express.json());
 
 // Configure Multer for temp uploads
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)){
+    fs.mkdirSync(uploadDir);
+}
 const upload = multer({ dest: 'uploads/' });
 
 // Serve static files from the React app
