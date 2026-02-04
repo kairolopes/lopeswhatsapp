@@ -123,6 +123,9 @@ if (EVOLUTION_API_KEY) {
 }
 
 const INSTANCE_NAME = process.env.INSTANCE_NAME || 'kairo2';
+function toRemoteJid(n) {
+    return n && n.includes('@') ? n : `${n}@s.whatsapp.net`;
+}
 
 // Check config on startup
 console.log('--- Server Config ---');
@@ -372,11 +375,14 @@ app.get('/api/setup-webhook', async (req, res) => {
             "webhook": {
                 "enabled": true,
                 "url": webhookUrl,
-                "webhookByEvents": false,
+                "base64": true,
+                "webhookByEvents": true,
+                "byEvents": true,
                 "events": [
                     "MESSAGES_UPSERT",
                     "MESSAGES_UPDATE",
-                    "SEND_MESSAGE"
+                    "CONTACTS_UPSERT",
+                    "CONTACTS_UPDATE"
                 ]
             }
         };
@@ -508,8 +514,9 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         // Handle specific media types
         if (type === 'audio') {
              // Evolution API specific for Voice Notes (PTT)
-             url = `${EVOLUTION_URL}/message/sendWhatsAppAudio/${INSTANCE_NAME}`;
-             formData.append('audio', fs.createReadStream(file.path));
+             url = `${EVOLUTION_URL}/sendMessage/sendWhatsAppAudio/${INSTANCE_NAME}`;
+             formData.append('remoteJid', toRemoteJid(number));
+             formData.append('file', fs.createReadStream(file.path), { filename: file.originalname, contentType: file.mimetype });
              // Some versions allow delay/presence options here too
         } else {
              // Prefer dedicated endpoint for images when available
@@ -658,31 +665,69 @@ app.post('/api/send-audio', async (req, res) => {
         if (!number || (!base64 && !url)) {
             return res.status(400).json({ error: 'Missing number and base64 or url' });
         }
-        const headers = { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY };
-        const target = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
-    const payload = { number, mediatype: 'audio' };
-        if (base64) payload.base64 = base64;
-        if (url) payload.url = url;
-    // Try to provide mimetype for better compatibility
-    let mimetype = null;
-    if (base64 && typeof base64 === 'string') {
-        if (base64.startsWith('data:') && base64.includes(';base64,')) {
-            mimetype = base64.substring(5, base64.indexOf(';base64,'));
+        // Preferred path: send voice note via multipart
+        let tempPath = null;
+        let previewUrl = null;
+        if (base64) {
+            const commaIndex = base64.indexOf(';base64,');
+            const mime = (commaIndex > 5) ? base64.substring(5, commaIndex) : 'audio/webm';
+            const data = base64.substring(commaIndex + 8);
+            const buf = Buffer.from(data, 'base64');
+            const ext = mime.includes('mpeg') ? 'mp3' : (mime.split('/')[1] || 'webm');
+            tempPath = path.join(uploadDir, `mic_${Date.now()}.${ext}`);
+            fs.writeFileSync(tempPath, buf);
+            previewUrl = `data:${mime};base64,${data}`;
+        } else if (url) {
+            // Prefer to let Evolution fetch by URL; but also create a local file for multipart compatibility
+            try {
+                const resp = await axios.get(url, { responseType: 'arraybuffer' });
+                const extGuess = url.split('?')[0].split('.').pop().toLowerCase();
+                const ext = ['mp3','wav','ogg','webm'].includes(extGuess) ? extGuess : 'mp3';
+                tempPath = path.join(uploadDir, `mic_${Date.now()}.${ext}`);
+                fs.writeFileSync(tempPath, Buffer.from(resp.data));
+            } catch {}
+            previewUrl = url;
         }
-    }
-    if (!mimetype && url) {
-        if (url.toLowerCase().endsWith('.mp3')) mimetype = 'audio/mpeg';
-        else if (url.toLowerCase().endsWith('.ogg')) mimetype = 'audio/ogg';
-        else if (url.toLowerCase().endsWith('.wav')) mimetype = 'audio/wav';
-        else if (url.toLowerCase().endsWith('.webm')) mimetype = 'audio/webm';
-    }
-    if (mimetype) payload.mimetype = mimetype;
-        if (caption) payload.caption = caption;
-        const response = await axios.post(target, payload, { headers });
+        let response;
+        try {
+            const fd = new FormData();
+            fd.append('remoteJid', toRemoteJid(number));
+            fd.append('file', fs.createReadStream(tempPath));
+            const headers = { ...fd.getHeaders(), apikey: EVOLUTION_API_KEY };
+            const target = `${EVOLUTION_URL}/sendMessage/sendWhatsAppAudio/${INSTANCE_NAME}`;
+            response = await axios.post(target, fd, { headers });
+        } catch (multipartErr) {
+            // Fallback: JSON with url/base64 to generic sendMedia
+            const headers = { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY };
+            const target = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
+            const payload = { number, mediatype: 'audio' };
+            if (base64) payload.base64 = base64;
+            if (url) payload.url = url;
+            if (caption) payload.caption = caption;
+            try {
+                response = await axios.post(target, payload, { headers });
+            } catch (jsonErr) {
+                // Final fallback: if we created a local file, expose via uploads and use URL
+                if (tempPath) {
+                    const host = req.get('host');
+                    const protocol = req.protocol === 'http' && host.includes('localhost') ? 'http' : 'https';
+                    const fileUrl = `${protocol}://${host}/uploads/${path.basename(tempPath)}`;
+                    const payload2 = { number, mediatype: 'audio', url: fileUrl };
+                    response = await axios.post(target, payload2, { headers });
+                    previewUrl = fileUrl;
+                } else {
+                    throw jsonErr;
+                }
+            }
+        } finally {
+            if (tempPath) {
+                try { fs.unlinkSync(tempPath); } catch {}
+            }
+        }
         if (response.data && response.data.key) {
             const msgId = response.data.key.id;
             const remoteJid = response.data.key.remoteJid || (number.includes('@') ? number : number + '@s.whatsapp.net');
-            const content = base64 || url || caption || '[Áudio Enviado]';
+            const content = previewUrl || base64 || url || caption || '[Áudio Enviado]';
             saveMessage({
                 id: msgId,
                 remoteJid,

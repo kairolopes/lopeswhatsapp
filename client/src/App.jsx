@@ -196,6 +196,18 @@ function App() {
       text = msgContent.conversation;
     } else if (msgContent.extendedTextMessage?.text) {
       text = msgContent.extendedTextMessage.text;
+    } else if (msgContent.base64 && (msgContent.imageMessage || msgContent.audioMessage)) {
+      const base64 = msgContent.base64;
+      if (msgContent.imageMessage) {
+        type = 'image';
+        text = msgContent.imageMessage.caption || 'Imagem';
+      } else {
+        type = 'audio';
+        text = 'Áudio';
+      }
+      mediaUrl = typeof base64 === 'string' && base64.startsWith('data:')
+        ? base64
+        : `data:${type === 'image' ? 'image/jpeg' : 'audio/mpeg'};base64,${base64}`;
     } else if (msgContent.imageMessage) {
       type = 'image';
       text = msgContent.imageMessage.caption || 'Imagem';
@@ -460,6 +472,24 @@ function App() {
             setActiveChatId(id); 
             setShowProfileInfo(false); 
             try { await axios.post(`/api/chats/${id}/read`); } catch(e) {}
+            // Enrich contact if needed
+            try {
+                const current = chats.find(c => c.id === id);
+                const isNumber = !current?.name || current?.name === id;
+                if (isNumber || !current?.avatar) {
+                    const numberOnly = String(id).split('@')[0];
+                    const res = await axios.post(`/chat/fetchProfile/kairo2`, { number: numberOnly });
+                    const updated = {
+                        id,
+                        name: res.data?.name || current?.name || id,
+                        avatar: res.data?.picture || res.data?.profilePictureUrl || current?.avatar || null,
+                        unread: current?.unread || 0,
+                        lastMessage: current?.lastMessage || '...',
+                        lastMessageTime: current?.lastMessageTime || ''
+                    };
+                    setChats(prev => prev.map(c => c.id === id ? updated : c));
+                }
+            } catch(e) {}
             // refresh unread counts
             try {
                 const countsRes = await axios.get('/api/unread-counts');
