@@ -106,6 +106,8 @@ if (!fs.existsSync(uploadDir)){
     fs.mkdirSync(uploadDir);
 }
 const upload = multer({ dest: 'uploads/' });
+// Serve uploaded files publicly for Evolution URL fallback
+app.use('/uploads', express.static(uploadDir));
 
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, '../client/dist')));
@@ -559,7 +561,16 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
                     throw fallbackError;
                 }
             } else {
-                // Try additional fallbacks for image/media
+                // Try JSON URL-based fallback so Evolution fetches the file from our server
+                try {
+                    const host = req.get('host');
+                    const protocol = req.protocol === 'http' && host.includes('localhost') ? 'http' : 'https';
+                    const fileUrl = `${protocol}://${host}/uploads/${path.basename(file.path)}`;
+                    const jsonHeaders = { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY };
+                    const imgUrl = `${EVOLUTION_URL}/message/sendImage/${INSTANCE_NAME}`;
+                    response = await axios.post(imgUrl, { number, url: fileUrl, caption }, { headers: jsonHeaders });
+                } catch (urlFallbackError) {
+                    // Try additional multipart fallbacks for image/media
                 const fallbacks = [
                     { url: `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`, build: (p) => { const f = new FormData(); f.append('number', number); if (caption) f.append('caption', caption); f.append('file', fs.createReadStream(p)); return f; } },
                     { url: `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`, build: (p) => { const f = new FormData(); f.append('number', number); if (caption) f.append('caption', caption); f.append('attachment', fs.createReadStream(p)); return f; } }
@@ -574,6 +585,7 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
                 }
                 if (!response) {
                     throw primaryError;
+                }
                 }
             }
         }
