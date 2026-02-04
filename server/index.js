@@ -95,13 +95,14 @@ app.get('/api/test-connection', async (req, res) => {
 
 // Proxy Endpoint to send TEXT messages
 app.post('/api/send-message', async (req, res) => {
+  let url = undefined;
   try {
     const { number, text } = req.body;
     if (!number || !text) return res.status(400).json({ error: 'Missing number or text' });
 
     console.log(`Sending text to ${number}: ${text}`);
     
-    const url = `${EVOLUTION_URL}/message/sendText/${INSTANCE_NAME}`;
+    url = `${EVOLUTION_URL}/message/sendText/${INSTANCE_NAME}`;
     console.log(`Target URL: ${url}`); // Debug Log
 
     // Headers for Evolution API
@@ -109,6 +110,8 @@ app.post('/api/send-message', async (req, res) => {
         'Content-Type': 'application/json',
         'apikey': EVOLUTION_API_KEY
     };
+
+    console.log(`Using API Key (prefix): ${EVOLUTION_API_KEY ? EVOLUTION_API_KEY.substring(0, 4) + '...' : 'NONE'}`);
 
     const response = await axios.post(url, {
       number,
@@ -125,10 +128,21 @@ app.post('/api/send-message', async (req, res) => {
     res.json(response.data);
     } catch (error) {
     // Only access url if it was defined
-    const targetUrl = typeof url !== 'undefined' ? url : 'unknown';
+    const targetUrl = url || 'unknown';
     console.error(`Error sending message to ${targetUrl}`);
     console.error('Status:', error.response?.status);
     console.error('Response Data:', JSON.stringify(error.response?.data || {}, null, 2));
+    
+    if (error.response?.status === 401) {
+        console.error('CRITICAL: 401 Unauthorized. Verify EVOLUTION_API_KEY in Render Environment Variables.');
+    }
+
+    res.status(error.response?.status || 500).json({ 
+        error: 'Failed to send message', 
+        details: error.response?.data || error.message 
+    });
+  }
+});
     
     if (error.response?.status === 401) {
         console.error('CRITICAL: 401 Unauthorized. Verify EVOLUTION_API_KEY in Render Environment Variables.');

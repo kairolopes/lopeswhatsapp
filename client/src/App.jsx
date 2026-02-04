@@ -36,9 +36,27 @@ function App() {
 
   const handleIncomingMessage = (event) => {
     // Defensive payload check: support both event.data and event directly
-    const msgData = event?.data || event;
+    // Also handle array updates (like contacts.update)
+    let msgData = event?.data || event;
+    
+    // If it's an array (e.g. contacts update), take the first item or handle accordingly
+    if (Array.isArray(msgData)) {
+        console.log('Received array data (likely contact update):', msgData);
+        // For now, if it's a contact update, we might want to update the avatar if we can match the JID
+        // But for chat display, we focus on messages.
+        // Let's try to extract the first item if it looks like a message, otherwise return to avoid error
+        if (msgData[0] && msgData[0].key) {
+             msgData = msgData[0];
+        } else {
+             return; // Skip non-message arrays for now to prevent crash
+        }
+    }
+
     if (!msgData || !msgData.key) {
-        console.warn('Invalid message format:', msgData);
+        // Only warn if it's not a standard system event we want to ignore
+        if (event?.event !== 'contacts.update') {
+             console.warn('Invalid message format:', msgData);
+        }
         return;
     }
 
