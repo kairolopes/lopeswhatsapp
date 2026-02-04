@@ -70,6 +70,8 @@ app.post('/api/send-message', async (req, res) => {
     if (!number || !text) return res.status(400).json({ error: 'Missing number or text' });
 
     console.log(`Sending text to ${number}: ${text}`);
+    
+    const url = `${EVOLUTION_URL}/message/sendText/${INSTANCE_NAME}`;
     console.log(`Target URL: ${url}`); // Debug Log
 
     // Headers for Evolution API
