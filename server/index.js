@@ -644,6 +644,42 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
     }
 });
 
+// Send Audio via base64/url JSON (for microphone recordings)
+app.post('/api/send-audio', async (req, res) => {
+    try {
+        const { number, base64, url, caption } = req.body;
+        if (!number || (!base64 && !url)) {
+            return res.status(400).json({ error: 'Missing number and base64 or url' });
+        }
+        const headers = { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY };
+        const target = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
+        const payload = { number, mediatype: 'audio' };
+        if (base64) payload.base64 = base64;
+        if (url) payload.url = url;
+        if (caption) payload.caption = caption;
+        const response = await axios.post(target, payload, { headers });
+        if (response.data && response.data.key) {
+            const msgId = response.data.key.id;
+            const remoteJid = response.data.key.remoteJid || (number.includes('@') ? number : number + '@s.whatsapp.net');
+            const content = caption || '[Áudio Enviado]';
+            saveMessage({
+                id: msgId,
+                remoteJid,
+                fromMe: true,
+                content,
+                type: 'audioMessage',
+                timestamp: Date.now(),
+                status: 'sent'
+            });
+        }
+        res.json(response.data);
+    } catch (error) {
+        res.status(error.response?.status || 500).json({
+            error: 'Failed to send audio',
+            details: error.response?.data || error.message
+        });
+    }
+});
 // Proxy for Fetch Profile
 app.post('/chat/fetchProfile/:instance', async (req, res) => {
     try {
