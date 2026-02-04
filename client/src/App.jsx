@@ -18,18 +18,26 @@ function App() {
   // Format: { [chatId]: Array<Message> }
   const [messages, setMessages] = useState({});
 
+  const [lastDebugEvent, setLastDebugEvent] = useState(null);
+
   useEffect(() => {
     socket.on('connect', () => setStatus('Connected'));
     socket.on('disconnect', () => setStatus('Disconnected'));
+    socket.on('connect_error', (err) => {
+        console.error('Socket Connection Error:', err);
+        setStatus('Error: ' + err.message);
+    });
 
     socket.on('webhook_event', (event) => {
       console.log('Received Event:', event);
+      setLastDebugEvent(JSON.stringify(event, null, 2)); // Show on UI
       handleIncomingMessage(event);
     });
 
     return () => {
       socket.off('connect');
       socket.off('disconnect');
+      socket.off('connect_error');
       socket.off('webhook_event');
     };
   }, [activeChatId]); // Re-subscribe when activeChatId changes to ensure fresh closure
@@ -73,21 +81,36 @@ function App() {
     let type = 'text';
     let mediaUrl = '';
 
-    if (msgData.message?.conversation) {
-      text = msgData.message.conversation;
-    } else if (msgData.message?.extendedTextMessage?.text) {
-      text = msgData.message.extendedTextMessage.text;
-    } else if (msgData.message?.imageMessage) {
+    // Robust payload parsing for Evolution v2
+    const msgContent = msgData.message || {};
+
+    if (msgContent.conversation) {
+      text = msgContent.conversation;
+    } else if (msgContent.extendedTextMessage?.text) {
+      text = msgContent.extendedTextMessage.text;
+    } else if (msgContent.imageMessage) {
       type = 'image';
-      text = msgData.message.imageMessage.caption || 'Imagem';
-      // In a real app, you'd need to download/decrypt the media. 
-      // Evolution might provide a URL or base64 if configured, or you fetch it.
-      // For now we use a placeholder or check if url is present.
-      mediaUrl = msgData.message.imageMessage.url || ''; 
-    } else if (msgData.message?.audioMessage) {
+      text = msgContent.imageMessage.caption || 'Imagem';
+      mediaUrl = msgContent.imageMessage.url || ''; 
+    } else if (msgContent.audioMessage) {
       type = 'audio';
       text = 'Áudio';
-      mediaUrl = msgData.message.audioMessage.url || '';
+      mediaUrl = msgContent.audioMessage.url || '';
+    } else if (msgContent.documentMessage) { // Added document support
+        type = 'document';
+        text = msgContent.documentMessage.fileName || 'Documento';
+        mediaUrl = msgContent.documentMessage.url || '';
+    } else if (msgContent.videoMessage) { // Added video support
+        type = 'video';
+        text = msgContent.videoMessage.caption || 'Vídeo';
+        mediaUrl = msgContent.videoMessage.url || '';
+    }
+    
+    // Fallback: If text is still empty but we have a message type, try to stringify
+    if (!text && !mediaUrl && Object.keys(msgContent).length > 0) {
+        console.warn('Unknown message content, logging raw:', msgContent);
+        // text = '[Mensagem não suportada]'; 
+        // Don't show unsupported messages to avoid clutter, or show debug
     }
 
     if (!text && !mediaUrl) return; // Unknown message type
@@ -231,7 +254,22 @@ function App() {
       />
 
       {/* Chat Window - Hidden on mobile if no chat active */}
-      <div className={activeChatId ? "flex-1 flex" : "hidden md:flex flex-1"}>
+      <div className={activeChatId ? "flex-1 flex flex-col relative" : "hidden md:flex flex-1 flex-col relative"}>
+          
+         {/* Debug Status Indicator */}
+         <div className="absolute top-0 right-0 p-2 z-50 flex flex-col items-end pointer-events-none opacity-50 hover:opacity-100 transition-opacity">
+            <div className={`flex items-center gap-2 px-2 py-1 rounded text-xs font-mono text-white ${status === 'Connected' ? 'bg-green-500' : 'bg-red-500'}`}>
+                <div className={`w-2 h-2 rounded-full ${status === 'Connected' ? 'bg-white' : 'bg-white animate-pulse'}`}></div>
+                {status}
+            </div>
+            {lastDebugEvent && (
+                <div className="mt-1 bg-black/80 text-green-400 text-[10px] p-2 rounded max-w-[200px] max-h-[100px] overflow-auto pointer-events-auto">
+                    <div className="font-bold border-b border-green-900 mb-1">Last Webhook:</div>
+                    <pre>{lastDebugEvent}</pre>
+                </div>
+            )}
+         </div>
+
          <ChatWindow 
            chat={activeChat}
            messages={activeChatId ? (messages[activeChatId] || []) : []}
