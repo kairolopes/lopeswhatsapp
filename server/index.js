@@ -9,8 +9,74 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import FormData from 'form-data';
 import fs from 'fs';
+import sqlite3 from 'sqlite3';
 
 dotenv.config();
+
+// Database Setup
+const dbPath = path.join(__dirname, 'database.sqlite');
+const db = new sqlite3.Database(dbPath, (err) => {
+    if (err) {
+        console.error('Error opening database:', err.message);
+    } else {
+        console.log('Connected to the SQLite database.');
+        initializeDatabase();
+    }
+});
+
+function initializeDatabase() {
+    db.serialize(() => {
+        // Create Chats table
+        db.run(`CREATE TABLE IF NOT EXISTS chats (
+            remoteJid TEXT PRIMARY KEY,
+            name TEXT,
+            profilePictureUrl TEXT,
+            lastMessageTimestamp INTEGER
+        )`);
+
+        // Create Messages table
+        db.run(`CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY,
+            remoteJid TEXT,
+            fromMe BOOLEAN,
+            content TEXT,
+            type TEXT,
+            timestamp INTEGER,
+            status TEXT,
+            FOREIGN KEY (remoteJid) REFERENCES chats (remoteJid)
+        )`);
+    });
+}
+
+// Helper to save message
+function saveMessage(messageData) {
+    const { id, remoteJid, fromMe, content, type, timestamp, status, pushName } = messageData;
+    
+    // First ensure chat exists (upsert-like logic)
+    db.run(`INSERT OR IGNORE INTO chats (remoteJid, name, lastMessageTimestamp) VALUES (?, ?, ?)`, 
+        [remoteJid, pushName || remoteJid, timestamp], 
+        (err) => {
+            if (err) console.error('Error creating chat:', err.message);
+            
+            // Update timestamp if chat existed
+            db.run(`UPDATE chats SET lastMessageTimestamp = ? WHERE remoteJid = ?`, [timestamp, remoteJid]);
+            
+            // Also update name if provided and not just the number
+            if (pushName) {
+                db.run(`UPDATE chats SET name = ? WHERE remoteJid = ? AND name = remoteJid`, [pushName, remoteJid]);
+            }
+        }
+    );
+
+    // Insert message
+    db.run(`INSERT OR REPLACE INTO messages (id, remoteJid, fromMe, content, type, timestamp, status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [id, remoteJid, fromMe, content, type, timestamp, status || 'sent'],
+        (err) => {
+            if (err) console.error('Error saving message:', err.message);
+        }
+    );
+}
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -76,7 +142,54 @@ app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
   };
   
   io.emit('webhook_event', event);
-  res.status(200).send('OK');
+
+    // Reuse logic from permissive webhook
+    if (event.event === 'messages.upsert' && event.data) {
+        try {
+             const msgData = event.data;
+             const remoteJid = msgData.key.remoteJid;
+             const fromMe = msgData.key.fromMe;
+             const id = msgData.key.id;
+             const pushName = msgData.pushName;
+             const timestamp = msgData.messageTimestamp || Date.now();
+             
+             let content = '';
+             let type = msgData.messageType || 'unknown';
+ 
+             if (msgData.message) {
+                 if (msgData.message.conversation) {
+                     content = msgData.message.conversation;
+                     type = 'conversation';
+                 } else if (msgData.message.extendedTextMessage) {
+                     content = msgData.message.extendedTextMessage.text;
+                     type = 'extendedTextMessage';
+                 } else if (msgData.message.imageMessage) {
+                     content = msgData.message.imageMessage.caption || '[Imagem]';
+                     type = 'imageMessage';
+                 } else if (msgData.message.audioMessage) {
+                     content = '[Áudio]';
+                     type = 'audioMessage';
+                 } else {
+                     content = JSON.stringify(msgData.message);
+                 }
+             }
+ 
+             saveMessage({
+                 id,
+                 remoteJid,
+                 fromMe,
+                 content,
+                 type,
+                 timestamp: typeof timestamp === 'number' ? timestamp * 1000 : Date.now(),
+                 status: 'received',
+                 pushName
+             });
+        } catch (e) {
+            console.error('Error saving webhook data:', e);
+        }
+    }
+
+    res.status(200).send('OK');
 });
 
 // Permissive Wildcard Webhook (catch wrong instance names but still process)
@@ -96,9 +209,97 @@ app.post('/webhook/*', (req, res) => {
 
     // Emit anyway so it works even with typo
     io.emit('webhook_event', event);
+
+    // Persist to database if it's a message
+    if (event.event === 'messages.upsert' && event.data) {
+        try {
+            const msgData = event.data;
+            const remoteJid = msgData.key.remoteJid;
+            const fromMe = msgData.key.fromMe;
+            const id = msgData.key.id;
+            const pushName = msgData.pushName;
+            const timestamp = msgData.messageTimestamp || Date.now();
+            
+            let content = '';
+            let type = msgData.messageType || 'unknown';
+
+            if (msgData.message) {
+                if (msgData.message.conversation) {
+                    content = msgData.message.conversation;
+                    type = 'conversation';
+                } else if (msgData.message.extendedTextMessage) {
+                    content = msgData.message.extendedTextMessage.text;
+                    type = 'extendedTextMessage';
+                } else if (msgData.message.imageMessage) {
+                    content = msgData.message.imageMessage.caption || '[Imagem]';
+                    type = 'imageMessage';
+                } else if (msgData.message.audioMessage) {
+                    content = '[Áudio]';
+                    type = 'audioMessage';
+                } else {
+                    content = JSON.stringify(msgData.message);
+                }
+            }
+
+            saveMessage({
+                id,
+                remoteJid,
+                fromMe,
+                content,
+                type,
+                timestamp: typeof timestamp === 'number' ? timestamp * 1000 : Date.now(), // Evolution timestamp is usually seconds
+                status: 'received',
+                pushName
+            });
+        } catch (e) {
+            console.error('Error processing webhook for DB:', e);
+        }
+    }
     
     res.status(200).send('OK (Permissive Mode)');
 });
+
+// History Endpoints
+app.get('/api/chats', (req, res) => {
+    db.all(`SELECT * FROM chats ORDER BY lastMessageTimestamp DESC`, [], (err, rows) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+            return;
+        }
+        res.json(rows);
+    });
+});
+
+app.get('/api/messages/:remoteJid', (req, res) => {
+    const { remoteJid } = req.params;
+    db.all(`SELECT * FROM messages WHERE remoteJid = ? ORDER BY timestamp ASC`, [remoteJid], (err, rows) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+            return;
+        }
+        res.json(rows);
+    });
+});
+
+app.delete('/api/chats/:remoteJid', (req, res) => {
+    const { remoteJid } = req.params;
+    // Transaction to delete messages and then chat
+    db.serialize(() => {
+        db.run(`DELETE FROM messages WHERE remoteJid = ?`, [remoteJid], (err) => {
+            if (err) {
+                console.error('Error deleting messages:', err);
+            }
+        });
+        db.run(`DELETE FROM chats WHERE remoteJid = ?`, [remoteJid], function(err) {
+            if (err) {
+                res.status(500).json({ error: err.message });
+                return;
+            }
+            res.json({ message: 'Chat deleted', changes: this.changes });
+        });
+    });
+});
+
 
 // Debug Endpoint to get last received webhook
 app.get('/api/debug/last-webhook', (req, res) => {
@@ -230,6 +431,22 @@ app.post('/api/send-message', async (req, res) => {
       linkPreview: false
     }, { headers });
 
+    // Save sent message to DB
+    if (response.data && response.data.key) {
+        const msgId = response.data.key.id;
+        const remoteJid = response.data.key.remoteJid || (number.includes('@') ? number : number + '@s.whatsapp.net');
+        
+        saveMessage({
+            id: msgId,
+            remoteJid: remoteJid,
+            fromMe: true,
+            content: text,
+            type: 'conversation',
+            timestamp: Date.now(),
+            status: 'sent'
+        });
+    }
+
     res.json(response.data);
     } catch (error) {
     // Only access url if it was defined
@@ -293,6 +510,23 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
             maxContentLength: Infinity,
             maxBodyLength: Infinity
         });
+
+        // Save sent media to DB
+        if (response.data && response.data.key) {
+            const msgId = response.data.key.id;
+            const remoteJid = response.data.key.remoteJid || (number.includes('@') ? number : number + '@s.whatsapp.net');
+            const content = caption || (type === 'audio' ? '[Áudio Enviado]' : '[Mídia Enviada]');
+            
+            saveMessage({
+                id: msgId,
+                remoteJid: remoteJid,
+                fromMe: true,
+                content: content,
+                type: type === 'audio' ? 'audioMessage' : 'imageMessage',
+                timestamp: Date.now(),
+                status: 'sent'
+            });
+        }
 
         // Clean up temp file
         fs.unlinkSync(file.path);

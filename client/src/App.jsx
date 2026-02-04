@@ -20,6 +20,63 @@ function App() {
 
   const [lastDebugEvent, setLastDebugEvent] = useState(null);
 
+  // Load Chats on Mount
+  useEffect(() => {
+    const fetchChats = async () => {
+        try {
+            const res = await axios.get('/api/chats');
+            const formattedChats = res.data.map(c => ({
+                id: c.remoteJid,
+                name: c.name || c.remoteJid,
+                avatar: c.profilePictureUrl,
+                unread: 0, // Unread count logic to be added
+                lastMessage: '...', // Can be refined
+                lastMessageTime: new Date(c.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }));
+            setChats(formattedChats);
+        } catch (err) {
+            console.error('Error fetching chats:', err);
+        }
+    };
+    fetchChats();
+  }, []);
+
+  // Load Messages when Chat is Active
+  useEffect(() => {
+    if (!activeChatId) return;
+
+    const fetchMessages = async () => {
+        try {
+            const res = await axios.get(`/api/messages/${activeChatId}`);
+            const formattedMessages = res.data.map(m => ({
+                type: m.fromMe ? 'out' : 'in',
+                msgType: m.type === 'imageMessage' ? 'image' : (m.type === 'audioMessage' ? 'audio' : 'text'),
+                text: m.content, // Content handling depends on type, simplfied here
+                mediaUrl: '', // URL handling if stored
+                time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                sender: m.fromMe ? 'me' : m.remoteJid,
+                pushName: m.pushName
+            }));
+            
+            // Adjust content based on type for display
+            const processedMessages = formattedMessages.map(m => {
+                 if (m.msgType === 'image' && m.text.includes('http')) {
+                      // If content is URL (future improvement)
+                 }
+                 return m;
+            });
+
+            setMessages(prev => ({
+                ...prev,
+                [activeChatId]: processedMessages
+            }));
+        } catch (err) {
+            console.error('Error fetching messages:', err);
+        }
+    };
+    fetchMessages();
+  }, [activeChatId]);
+
   useEffect(() => {
     socket.on('connect', () => setStatus('Connected'));
     socket.on('disconnect', () => setStatus('Disconnected'));
@@ -275,6 +332,29 @@ function App() {
     }
   };
 
+  const handleDeleteChat = async () => {
+    if (!activeChatId) return;
+    if (!window.confirm('Tem certeza que deseja apagar esta conversa? Somente você pode fazer isso.')) return;
+
+    try {
+        await axios.delete(`/api/chats/${activeChatId}`);
+        
+        // Update State
+        setChats(prev => prev.filter(c => c.id !== activeChatId));
+        setMessages(prev => {
+            const newMessages = { ...prev };
+            delete newMessages[activeChatId];
+            return newMessages;
+        });
+        
+        setActiveChatId(null);
+        setShowProfileInfo(false);
+    } catch (err) {
+        console.error('Error deleting chat:', err);
+        alert('Erro ao apagar conversa');
+    }
+  };
+
   const activeChat = chats.find(c => c.id === activeChatId);
   const [showProfileInfo, setShowProfileInfo] = useState(false);
 
@@ -362,6 +442,14 @@ function App() {
                             <h3 className="text-sm text-green-600 font-medium mb-1">Recado</h3>
                             <p className="text-gray-800">Disponível</p>
                         </div>
+
+                        <button 
+                            onClick={handleDeleteChat}
+                            className="mt-6 w-full py-2 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors flex items-center justify-center gap-2"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            Apagar Conversa
+                        </button>
                     </div>
                 </div>
             )}
