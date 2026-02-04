@@ -48,6 +48,13 @@ function initializeDatabase() {
             status TEXT,
             FOREIGN KEY (remoteJid) REFERENCES chats (remoteJid)
         )`);
+
+        // Track last read timestamp per chat
+        db.run(`CREATE TABLE IF NOT EXISTS read_state (
+            remoteJid TEXT PRIMARY KEY,
+            lastReadTimestamp INTEGER DEFAULT 0,
+            FOREIGN KEY (remoteJid) REFERENCES chats (remoteJid)
+        )`);
     });
 }
 
@@ -261,7 +268,14 @@ app.post('/webhook/*', (req, res) => {
 
 // History Endpoints
 app.get('/api/chats', (req, res) => {
-    db.all(`SELECT * FROM chats ORDER BY lastMessageTimestamp DESC`, [], (err, rows) => {
+    db.all(`
+        SELECT 
+            c.remoteJid, c.name, c.profilePictureUrl, c.lastMessageTimestamp,
+            COALESCE(rs.lastReadTimestamp, 0) AS lastReadTimestamp
+        FROM chats c
+        LEFT JOIN read_state rs ON rs.remoteJid = c.remoteJid
+        ORDER BY c.lastMessageTimestamp DESC
+    `, [], (err, rows) => {
         if (err) {
             res.status(500).json({ error: err.message });
             return;
@@ -278,6 +292,47 @@ app.get('/api/messages/:remoteJid', (req, res) => {
             return;
         }
         res.json(rows);
+    });
+});
+
+// Mark chat as read (sets lastReadTimestamp to now)
+app.post('/api/chats/:remoteJid/read', (req, res) => {
+    const { remoteJid } = req.params;
+    const now = Date.now();
+    db.run(`INSERT INTO read_state (remoteJid, lastReadTimestamp) 
+            VALUES (?, ?) 
+            ON CONFLICT(remoteJid) DO UPDATE SET lastReadTimestamp = excluded.lastReadTimestamp`,
+        [remoteJid, now],
+        function(err) {
+            if (err) {
+                return res.status(500).json({ error: err.message });
+            }
+            res.json({ success: true, remoteJid, lastReadTimestamp: now });
+        }
+    );
+});
+
+// Unread counts for all chats
+app.get('/api/unread-counts', (req, res) => {
+    const sql = `
+        SELECT 
+            c.remoteJid AS remoteJid,
+            COALESCE(SUM(CASE 
+                WHEN m.fromMe = 0 
+                 AND m.timestamp > COALESCE(rs.lastReadTimestamp, 0) 
+                THEN 1 ELSE 0 END), 0) AS unread
+        FROM chats c
+        LEFT JOIN messages m ON m.remoteJid = c.remoteJid
+        LEFT JOIN read_state rs ON rs.remoteJid = c.remoteJid
+        GROUP BY c.remoteJid
+    `;
+    db.all(sql, [], (err, rows) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        const map = {};
+        rows.forEach(r => { map[r.remoteJid] = r.unread; });
+        res.json(map);
     });
 });
 

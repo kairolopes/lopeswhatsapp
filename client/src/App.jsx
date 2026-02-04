@@ -9,6 +9,7 @@ const socket = io();
 function App() {
   const [status, setStatus] = useState('Disconnected');
   const [activeChatId, setActiveChatId] = useState(null);
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   
   // State for Chats (Contacts)
   // Format: { id: string (number), name: string, avatar: string, unread: number, lastMessage: string, lastMessageTime: string }
@@ -24,14 +25,20 @@ function App() {
   useEffect(() => {
     const fetchChats = async () => {
         try {
-            const res = await axios.get('/api/chats');
+            const [res, countsRes] = await Promise.all([
+                axios.get('/api/chats'),
+                axios.get('/api/unread-counts')
+            ]);
+            const counts = countsRes.data || {};
             const formattedChats = res.data.map(c => ({
                 id: c.remoteJid,
                 name: c.name || c.remoteJid,
                 avatar: c.profilePictureUrl,
-                unread: 0, // Unread count logic to be added
-                lastMessage: '...', // Can be refined
-                lastMessageTime: new Date(c.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                unread: counts[c.remoteJid] || 0,
+                lastMessage: '...',
+                lastMessageTime: c.lastMessageTimestamp 
+                    ? new Date(c.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : ''
             }));
             setChats(formattedChats);
         } catch (err) {
@@ -303,6 +310,8 @@ function App() {
           return { ...prev, [activeChatId]: updated };
         });
       }
+      // Mark chat as read after send
+      try { await axios.post(`/api/chats/${activeChatId}/read`); } catch(e) {}
     } catch (error) {
       console.error('Failed to send', error);
       alert('Erro ao enviar mensagem');
@@ -358,6 +367,7 @@ function App() {
                 return { ...prev, [activeChatId]: updated };
             });
         }
+        try { await axios.post(`/api/chats/${activeChatId}/read`); } catch(e) {}
 
     } catch (error) {
         console.error('Failed to send media', error);
@@ -397,7 +407,19 @@ function App() {
       <Sidebar 
         chats={chats} 
         activeChatId={activeChatId} 
-        onSelectChat={(id) => { setActiveChatId(id); setShowProfileInfo(false); }}
+        onSelectChat={async (id) => { 
+            setActiveChatId(id); 
+            setShowProfileInfo(false); 
+            try { await axios.post(`/api/chats/${id}/read`); } catch(e) {}
+            // refresh unread counts
+            try {
+                const countsRes = await axios.get('/api/unread-counts');
+                const counts = countsRes.data || {};
+                setChats(prev => prev.map(c => ({ ...c, unread: counts[c.id] || 0 })));
+            } catch(e) {}
+        }}
+        showUnreadOnly={showUnreadOnly}
+        onToggleUnread={() => setShowUnreadOnly(v => !v)}
         className={activeChatId ? "hidden md:flex w-full md:w-[400px]" : "flex w-full md:w-[400px]"}
       />
 

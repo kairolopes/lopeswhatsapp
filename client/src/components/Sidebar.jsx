@@ -7,7 +7,9 @@ export const Sidebar = ({
   activeChatId, 
   onSelectChat, 
   currentUser,
-  className 
+  className,
+  showUnreadOnly = false,
+  onToggleUnread
 }) => {
   return (
     <div className={cn("flex flex-col h-full bg-white border-r border-gray-300", className)}>
@@ -18,10 +20,16 @@ export const Sidebar = ({
            <img src="https://ui-avatars.com/api/?name=Me&background=random" alt="Me" />
         </div>
         
-        <div className="flex gap-4 text-gray-600">
+        <div className="flex gap-4 text-gray-600 items-center">
            <Users size={24} className="cursor-pointer" />
            <MessageSquarePlus size={24} className="cursor-pointer" />
            <MoreVertical size={24} className="cursor-pointer" />
+           <button 
+             onClick={onToggleUnread}
+             className={cn("ml-2 px-2 py-1 text-xs rounded border", showUnreadOnly ? "bg-[#25d366] text-white border-[#25d366]" : "bg-white text-gray-700 border-gray-300")}
+           >
+             Não lidas
+           </button>
         </div>
       </div>
 
@@ -39,7 +47,7 @@ export const Sidebar = ({
 
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
-         {chats.map((chat) => (
+         {(showUnreadOnly ? chats.filter(c => c.unread > 0) : chats).map((chat) => (
            <div 
              key={chat.id}
              onClick={() => onSelectChat(chat.id)}

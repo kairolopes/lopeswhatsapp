@@ -58,7 +58,7 @@ export const ChatWindow = ({
                  {chat.name || chat.id}
                </h3>
                <span className="text-xs text-gray-500 truncate">
-                 clique para dados do contato
+                 {chat.id?.split('@')[0]}
                </span>
             </div>
          </div>
