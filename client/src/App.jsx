@@ -70,7 +70,8 @@ function App() {
                     mediaUrl: looksLikeUrl ? content : '',
                     time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                     sender: m.fromMe ? 'me' : m.remoteJid,
-                    pushName: m.pushName
+                    pushName: m.pushName,
+                    status: m.status || ''
                 };
             });
             
@@ -141,6 +142,23 @@ function App() {
   }, [activeChatId]); // Re-subscribe when activeChatId changes to ensure fresh closure
 
   const handleIncomingMessage = async (event) => {
+    // Status updates: update ticks without requiring message content
+    if (event?.event === 'SEND_MESSAGE_UPDATE' && event?.data?.key?.id) {
+        const id = event.data.key.id;
+        const remoteJid = event.data.key.remoteJid;
+        const statusRaw = String(event.data.status || '').toUpperCase();
+        let status = '';
+        if (statusRaw.includes('DELIVERY')) status = 'delivered';
+        if (statusRaw.includes('READ')) status = 'read';
+        if (statusRaw.includes('SENT')) status = 'sent';
+        setMessages(prev => {
+            const jid = remoteJid || activeChatId;
+            const list = prev[jid] || [];
+            const updated = list.map(m => (m.id === id ? { ...m, status } : m));
+            return { ...prev, [jid]: updated };
+        });
+        return;
+    }
     // Defensive payload check: support both event.data and event directly
     // Also handle array updates (like contacts.update)
     let msgData = event?.data || event;
@@ -272,7 +290,8 @@ function App() {
       mediaUrl: mediaUrl,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       sender: number,
-      pushName: pushName
+      pushName: pushName,
+      status: isFromMe ? 'sent' : ''
     };
 
     // Update Messages

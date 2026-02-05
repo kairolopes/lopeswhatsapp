@@ -200,6 +200,24 @@ app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
             console.error('Error saving webhook data:', e);
         }
     }
+    
+    // Delivery/Read Status updates
+    if ((event.event === 'SEND_MESSAGE_UPDATE' || event.event === 'messages.update') && event.data && event.data.key) {
+        try {
+            const id = event.data.key.id;
+            const statusRaw = String(event.data.status || '').toUpperCase();
+            let status = 'sent';
+            if (statusRaw.includes('DELIVERY')) status = 'delivered';
+            if (statusRaw.includes('READ')) status = 'read';
+            if (statusRaw.includes('ERROR') || statusRaw.includes('FAIL')) status = 'error';
+            const ts = event.data.messageTimestamp ? (Number(event.data.messageTimestamp) * 1000) : Date.now();
+            db.run(`UPDATE messages SET status = ?, timestamp = ? WHERE id = ?`, [status, ts, id], (err) => {
+                if (err) console.error('Error updating message status:', err.message);
+            });
+        } catch (e) {
+            console.error('Error handling SEND_MESSAGE_UPDATE:', e.message);
+        }
+    }
 
     res.status(200).send('OK');
 });

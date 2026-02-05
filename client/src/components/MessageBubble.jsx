@@ -62,9 +62,23 @@ export const MessageBubble = ({ message, isOwn }) => {
             {message.time || format(new Date(), 'HH:mm')}
           </span>
           {isOwn && (
-             <span className="text-blue-500">
-                <CheckCheck size={14} />
-             </span>
+            <>
+              {(!message.status || message.status === 'sent') && (
+                <span className="text-gray-400">
+                  <Check size={14} />
+                </span>
+              )}
+              {message.status === 'delivered' && (
+                <span className="text-gray-500">
+                  <CheckCheck size={14} />
+                </span>
+              )}
+              {message.status === 'read' && (
+                <span className="text-blue-500">
+                  <CheckCheck size={14} />
+                </span>
+              )}
+            </>
           )}
         </div>
       </div>
