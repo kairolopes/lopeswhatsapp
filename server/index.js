@@ -148,10 +148,13 @@ console.log('---------------------');
 let lastWebhookData = null;
 
 // Webhook Endpoint
-app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
+app.post(`/webhook/${INSTANCE_NAME}`, async (req, res) => {
+  // Check API Key if needed (Evolution sends it in 'apikey' header)
+  // But we might want to be permissive for now to ensure we get data
   console.log('--- Incoming Webhook ---');
   console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('Body:', JSON.stringify(req.body, null, 2));
+  // console.log('Body:', JSON.stringify(req.body, null, 2)); // Reduced logs for cleanliness
+  console.log('Event Type:', req.body.event);
   console.log('------------------------');
 
   const event = req.body;
@@ -167,23 +170,26 @@ app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
     // Handle CONTACTS_UPDATE or CONTACTS_UPSERT
     if ((event.event === 'CONTACTS_UPDATE' || event.event === 'CONTACTS_UPSERT') && event.data) {
         try {
-            const data = Array.isArray(event.data) ? event.data[0] : event.data;
-            if (data) {
-                const remoteJid = data.id || data.remoteJid;
+            const dataArray = Array.isArray(event.data) ? event.data : [event.data];
+            for (const data of dataArray) {
+                if (data) {
+                    const remoteJid = data.id || data.remoteJid;
                 const pushName = data.pushName || data.name;
-                const profilePictureUrl = data.profilePictureUrl || data.picture;
+                // Add profilePicUrl as per documentation
+                const profilePictureUrl = data.profilePicUrl || data.profilePictureUrl || data.picture;
                 
                 if (remoteJid) {
-                     db.run(`INSERT OR IGNORE INTO chats (remoteJid, name, lastMessageTimestamp) VALUES (?, ?, ?)`, 
-                        [remoteJid, pushName || remoteJid, Date.now()]);
+                         db.run(`INSERT OR IGNORE INTO chats (remoteJid, name, lastMessageTimestamp) VALUES (?, ?, ?)`, 
+                            [remoteJid, pushName || remoteJid, Date.now()]);
 
-                    if (pushName) {
-                        db.run(`UPDATE chats SET name = ? WHERE remoteJid = ?`, [pushName, remoteJid]);
+                        if (pushName) {
+                            db.run(`UPDATE chats SET name = ? WHERE remoteJid = ?`, [pushName, remoteJid]);
+                        }
+                        if (profilePictureUrl) {
+                            db.run(`UPDATE chats SET profilePictureUrl = ? WHERE remoteJid = ?`, [profilePictureUrl, remoteJid]);
+                        }
+                        console.log(`Updated contact info for ${remoteJid}: Name=${pushName}, Pic=${Boolean(profilePictureUrl)}`);
                     }
-                    if (profilePictureUrl) {
-                        db.run(`UPDATE chats SET profilePictureUrl = ? WHERE remoteJid = ?`, [profilePictureUrl, remoteJid]);
-                    }
-                    console.log(`Updated contact info for ${remoteJid}: Name=${pushName}, Pic=${Boolean(profilePictureUrl)}`);
                 }
             }
         } catch (e) {
@@ -199,9 +205,27 @@ app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
              const fromMe = msgData.key.fromMe;
              const id = msgData.key.id;
              const pushName = msgData.pushName;
-             const profilePictureUrl = msgData.profilePictureUrl || msgData.senderPhoto; // Capture profile picture from message event
+             // Add profilePicUrl as per documentation
+             let profilePictureUrl = msgData.profilePicUrl || msgData.profilePictureUrl || msgData.senderPhoto; // Capture profile picture from message event
              const timestamp = msgData.messageTimestamp || Date.now();
              
+             // --- FORCE PROFILE FETCH IF MISSING ---
+             if (!profilePictureUrl && !fromMe && remoteJid) {
+                 try {
+                     // Fire and forget fetch to update DB asynchronously
+                     axios.post(`${EVOLUTION_URL}/chat/fetchProfilePictureUrl/${INSTANCE_NAME}`, { number: remoteJid }, {
+                        headers: { 'apikey': EVOLUTION_API_KEY }
+                     }).then(resp => {
+                         const fetchedUrl = resp.data?.profilePictureUrl || resp.data?.picture;
+                         if (fetchedUrl) {
+                             console.log(`Fetched missing profile pic for ${remoteJid}: ${fetchedUrl}`);
+                             db.run(`UPDATE chats SET profilePictureUrl = ? WHERE remoteJid = ?`, [fetchedUrl, remoteJid]);
+                         }
+                     }).catch(() => {}); // Ignore errors in background fetch
+                 } catch (e) {}
+             }
+             // -------------------------------------
+
              // Update chat info immediately if available
              if (pushName || profilePictureUrl) {
                 db.run(`INSERT OR IGNORE INTO chats (remoteJid, name, lastMessageTimestamp) VALUES (?, ?, ?)`, 
@@ -222,14 +246,32 @@ app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
                      content = msgData.message.extendedTextMessage.text;
                      type = 'extendedTextMessage';
                  } else if (msgData.message.imageMessage) {
-                    const b64 = msgData.base64 || msgData.message.base64;
+                    const imgMsg = msgData.message.imageMessage;
+                    console.log('--- Image Message Received ---');
+                    console.log('Keys:', Object.keys(imgMsg));
+                    
+                    const b64 = msgData.base64 || msgData.message.base64 || imgMsg.jpegThumbnail; // Fallback to thumbnail if full image missing
                     if (b64 && typeof b64 === 'string') {
                         const dataUrl = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
                         content = dataUrl;
                     } else {
-                        content = msgData.message.imageMessage.url || msgData.message.imageMessage.caption || '[Imagem]';
+                        // Try to find a URL
+                        content = imgMsg.url || imgMsg.directPath || imgMsg.caption || '[Imagem]';
                     }
                     type = 'imageMessage';
+                 } else if (msgData.message.documentMessage) {
+                    const docMsg = msgData.message.documentMessage;
+                    console.log('--- Document Message Received ---');
+                    console.log('Keys:', Object.keys(docMsg));
+                    
+                    const b64 = msgData.base64 || msgData.message.base64;
+                     if (b64 && typeof b64 === 'string') {
+                        const dataUrl = b64.startsWith('data:') ? b64 : `data:application/pdf;base64,${b64}`;
+                        content = dataUrl;
+                    } else {
+                        content = docMsg.url || '[Documento]';
+                    }
+                    type = 'documentMessage';
                  } else if (msgData.message.audioMessage) {
                     const b64a = msgData.base64 || msgData.message.base64;
                     if (b64a && typeof b64a === 'string') {
