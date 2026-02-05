@@ -86,7 +86,20 @@ export const ChatWindow = ({
       </div>
 
       {/* Input Area */}
-      <ChatInput onSend={onSend} onSendMedia={onSendMedia} onSendAudio={onSendAudio} />
+      <ChatInput 
+        onSend={onSend} 
+        onSendMedia={onSendMedia} 
+        onSendAudio={onSendAudio} 
+        onComposePoll={() => {
+          const title = window.prompt('Pergunta da enquete:');
+          if (!title) return;
+          const opts = window.prompt('Opções separadas por vírgula:');
+          const options = (opts || '').split(',').map(s => s.trim()).filter(Boolean);
+          if (options.length < 2) { alert('Informe pelo menos 2 opções.'); return; }
+          const event = new CustomEvent('compose-poll', { detail: { title, options } });
+          window.dispatchEvent(event);
+        }} 
+      />
     </div>
   );
 };

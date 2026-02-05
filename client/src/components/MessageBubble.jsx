@@ -37,6 +37,20 @@ export const MessageBubble = ({ message, isOwn }) => {
              </audio>
           )}
 
+          {message.type === 'poll' && (
+            <div className="mb-2">
+              <div className="font-semibold mb-1">{message.text}</div>
+              {/* options list not interactive */}
+              {Array.isArray(message.options) && message.options.length > 0 && (
+                 <div className="flex flex-wrap gap-2">
+                   {message.options.map((opt, idx) => (
+                     <span key={idx} className="px-2 py-1 text-xs bg-gray-100 rounded border border-gray-200">{opt}</span>
+                   ))}
+                 </div>
+              )}
+            </div>
+          )}
+
           {(!message.type || message.type === 'text' || message.type === 'in' || message.type === 'out') && (
             <p className="whitespace-pre-wrap">{message.text}</p>
           )}

@@ -1,9 +1,9 @@
 import React, { useState, useRef } from 'react';
-import { Smile, Paperclip, Mic, Send, Image as ImageIcon, X } from 'lucide-react';
+import { Smile, Paperclip, Mic, Send, FilePlus } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 import { cn } from '../lib/utils';
 
-export const ChatInput = ({ onSend, onSendMedia, onSendAudio }) => {
+export const ChatInput = ({ onSend, onSendMedia, onSendAudio, onComposePoll }) => {
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const fileInputRef = useRef(null);
@@ -100,6 +100,13 @@ export const ChatInput = ({ onSend, onSendMedia, onSendAudio }) => {
           className="hover:text-gray-700 transition-colors"
         >
           <Paperclip size={24} />
+        </button>
+        <button 
+          onClick={() => onComposePoll && onComposePoll()}
+          className="hover:text-gray-700 transition-colors"
+          title="Criar enquete"
+        >
+          <FilePlus size={24} />
         </button>
         <input 
           type="file" 

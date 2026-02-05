@@ -107,11 +107,36 @@ function App() {
       handleIncomingMessage(event);
     });
 
+    const pollListener = async (e) => {
+        try {
+            const { title, options } = e.detail || {};
+            if (!activeChatId) return;
+            const res = await axios.post('/api/send-poll', { number: activeChatId, title, options });
+            const realId = res?.data?.key?.id;
+            const newMessage = {
+                id: realId || ('PENDING:' + Date.now()),
+                type: 'out',
+                msgType: 'poll',
+                text: title,
+                mediaUrl: '',
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+            setMessages(prev => ({
+                ...prev,
+                [activeChatId]: [...(prev[activeChatId] || []), newMessage]
+            }));
+        } catch (err) {
+            alert('Erro ao enviar enquete');
+        }
+    };
+    window.addEventListener('compose-poll', pollListener);
+
     return () => {
       socket.off('connect');
       socket.off('disconnect');
       socket.off('connect_error');
       socket.off('webhook_event');
+      window.removeEventListener('compose-poll', pollListener);
     };
   }, [activeChatId]); // Re-subscribe when activeChatId changes to ensure fresh closure
 
@@ -208,6 +233,10 @@ function App() {
       mediaUrl = typeof base64 === 'string' && base64.startsWith('data:')
         ? base64
         : `data:${type === 'image' ? 'image/jpeg' : 'audio/mpeg'};base64,${base64}`;
+    } else if (msgContent.pollMessage) {
+      type = 'poll';
+      text = msgContent.pollMessage.title || 'Enquete';
+      mediaUrl = '';
     } else if (msgContent.imageMessage) {
       type = 'image';
       text = msgContent.imageMessage.caption || 'Imagem';

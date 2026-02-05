@@ -375,9 +375,8 @@ app.get('/api/setup-webhook', async (req, res) => {
             "webhook": {
                 "enabled": true,
                 "url": webhookUrl,
-                "base64": true,
+                "webhookBase64": true,
                 "webhookByEvents": true,
-                "byEvents": true,
                 "events": [
                     "MESSAGES_UPSERT",
                     "MESSAGES_UPDATE",
@@ -742,6 +741,46 @@ app.post('/api/send-audio', async (req, res) => {
     } catch (error) {
         res.status(error.response?.status || 500).json({
             error: 'Failed to send audio',
+            details: error.response?.data || error.message
+        });
+    }
+});
+
+// Send Poll
+app.post('/api/send-poll', async (req, res) => {
+    try {
+        const { number, title, options, selectableCount } = req.body;
+        if (!number || !title || !Array.isArray(options) || options.length < 2) {
+            return res.status(400).json({ error: 'Missing number, title or options' });
+        }
+        const headers = { 'apikey': EVOLUTION_API_KEY };
+        const payload = { remoteJid: toRemoteJid(number), title, options, selectableCount: selectableCount || 1 };
+        let response;
+        try {
+            const url = `${EVOLUTION_URL}/message/sendPoll/${INSTANCE_NAME}`;
+            response = await axios.post(url, payload, { headers });
+        } catch (e1) {
+            const url2 = `${EVOLUTION_URL}/sendMessage/sendPoll/${INSTANCE_NAME}`;
+            response = await axios.post(url2, payload, { headers });
+        }
+        if (response.data && response.data.key) {
+            const msgId = response.data.key.id;
+            const remoteJid = response.data.key.remoteJid || toRemoteJid(number);
+            const content = JSON.stringify({ title, options });
+            saveMessage({
+                id: msgId,
+                remoteJid,
+                fromMe: true,
+                content,
+                type: 'pollMessage',
+                timestamp: Date.now(),
+                status: 'sent'
+            });
+        }
+        res.json(response.data);
+    } catch (error) {
+        res.status(error.response?.status || 500).json({
+            error: 'Failed to send poll',
             details: error.response?.data || error.message
         });
     }
