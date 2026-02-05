@@ -505,41 +505,6 @@ function App() {
       {/* Chat Window - Hidden on mobile if no chat active */}
       <div className={activeChatId ? "flex-1 flex flex-col relative" : "hidden md:flex flex-1 flex-col relative"}>
           
-         {/* Debug Status Indicator */}
-         <div className="absolute top-0 right-0 p-2 z-50 flex flex-col items-end pointer-events-none opacity-50 hover:opacity-100 transition-opacity">
-            <div className={`flex items-center gap-2 px-2 py-1 rounded text-xs font-mono text-white ${status === 'Connected' ? 'bg-green-500' : 'bg-red-500'}`}>
-                <div className={`w-2 h-2 rounded-full ${status === 'Connected' ? 'bg-white' : 'bg-white animate-pulse'}`}></div>
-                {status}
-            </div>
-            
-            <button 
-                onClick={() => axios.get('/api/simulate-webhook')}
-                className="mt-2 px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 pointer-events-auto"
-            >
-                Simular Recebimento
-            </button>
-
-            <button 
-                onClick={async () => {
-                    try {
-                        const res = await axios.get('/api/debug/last-webhook');
-                        setLastDebugEvent(JSON.stringify(res.data, null, 2));
-                    } catch (e) {
-                        alert('Erro ao buscar log: ' + e.message);
-                    }
-                }}
-                className="mt-2 px-2 py-1 bg-purple-600 text-white text-xs rounded hover:bg-purple-700 pointer-events-auto"
-            >
-                Verificar Webhook Real
-            </button>
-
-            {lastDebugEvent && (
-                <div className="mt-1 bg-black/80 text-green-400 text-[10px] p-2 rounded max-w-[200px] max-h-[100px] overflow-auto pointer-events-auto">
-                    <div className="font-bold border-b border-green-900 mb-1">Last Webhook:</div>
-                    <pre>{lastDebugEvent}</pre>
-                </div>
-            )}
-         </div>
 
          <div className="flex flex-1 h-full overflow-hidden">
             <ChatWindow 
