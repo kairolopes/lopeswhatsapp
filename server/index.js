@@ -164,6 +164,33 @@ app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
   
   io.emit('webhook_event', event);
 
+    // Handle CONTACTS_UPDATE or CONTACTS_UPSERT
+    if ((event.event === 'CONTACTS_UPDATE' || event.event === 'CONTACTS_UPSERT') && event.data) {
+        try {
+            const data = Array.isArray(event.data) ? event.data[0] : event.data;
+            if (data) {
+                const remoteJid = data.id || data.remoteJid;
+                const pushName = data.pushName || data.name;
+                const profilePictureUrl = data.profilePictureUrl || data.picture;
+                
+                if (remoteJid) {
+                     db.run(`INSERT OR IGNORE INTO chats (remoteJid, name, lastMessageTimestamp) VALUES (?, ?, ?)`, 
+                        [remoteJid, pushName || remoteJid, Date.now()]);
+
+                    if (pushName) {
+                        db.run(`UPDATE chats SET name = ? WHERE remoteJid = ?`, [pushName, remoteJid]);
+                    }
+                    if (profilePictureUrl) {
+                        db.run(`UPDATE chats SET profilePictureUrl = ? WHERE remoteJid = ?`, [profilePictureUrl, remoteJid]);
+                    }
+                    console.log(`Updated contact info for ${remoteJid}: Name=${pushName}, Pic=${Boolean(profilePictureUrl)}`);
+                }
+            }
+        } catch (e) {
+            console.error('Error handling CONTACTS_UPDATE:', e.message);
+        }
+    }
+
     // Reuse logic from permissive webhook
     if (event.event === 'messages.upsert' && event.data) {
         try {
@@ -172,7 +199,17 @@ app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
              const fromMe = msgData.key.fromMe;
              const id = msgData.key.id;
              const pushName = msgData.pushName;
+             const profilePictureUrl = msgData.profilePictureUrl || msgData.senderPhoto; // Capture profile picture from message event
              const timestamp = msgData.messageTimestamp || Date.now();
+             
+             // Update chat info immediately if available
+             if (pushName || profilePictureUrl) {
+                db.run(`INSERT OR IGNORE INTO chats (remoteJid, name, lastMessageTimestamp) VALUES (?, ?, ?)`, 
+                    [remoteJid, pushName || remoteJid, Date.now()]);
+                
+                if (pushName) db.run(`UPDATE chats SET name = ? WHERE remoteJid = ?`, [pushName, remoteJid]);
+                if (profilePictureUrl) db.run(`UPDATE chats SET profilePictureUrl = ? WHERE remoteJid = ?`, [profilePictureUrl, remoteJid]);
+             }
              
              let content = '';
              let type = msgData.messageType || 'unknown';
