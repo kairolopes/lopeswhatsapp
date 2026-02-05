@@ -268,11 +268,17 @@ function App() {
     } else if (msgContent.imageMessage) {
       type = 'image';
       text = msgContent.imageMessage.caption || 'Imagem';
-      mediaUrl = msgContent.imageMessage.url || ''; 
+      mediaUrl = msgContent.imageMessage.url || (event?.base64 || '');
+      if (!mediaUrl && event?.base64 && typeof event.base64 === 'string') {
+        mediaUrl = event.base64.startsWith('data:') ? event.base64 : `data:image/jpeg;base64,${event.base64}`;
+      }
     } else if (msgContent.audioMessage) {
       type = 'audio';
       text = 'Áudio';
-      mediaUrl = msgContent.audioMessage.url || '';
+      mediaUrl = msgContent.audioMessage.url || (event?.base64 || '');
+      if (!mediaUrl && event?.base64 && typeof event.base64 === 'string') {
+        mediaUrl = event.base64.startsWith('data:') ? event.base64 : `data:audio/mpeg;base64,${event.base64}`;
+      }
     } else if (msgContent.documentMessage) { // Added document support
         type = 'document';
         text = msgContent.documentMessage.fileName || 'Documento';

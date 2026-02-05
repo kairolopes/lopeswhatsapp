@@ -55,6 +55,14 @@ function initializeDatabase() {
             lastReadTimestamp INTEGER DEFAULT 0,
             FOREIGN KEY (remoteJid) REFERENCES chats (remoteJid)
         )`);
+        
+        // Ensure soft-delete columns exist
+        try {
+            db.run(`ALTER TABLE chats ADD COLUMN deleted BOOLEAN DEFAULT 0`, (err) => {});
+        } catch (e) {}
+        try {
+            db.run(`ALTER TABLE messages ADD COLUMN deleted BOOLEAN DEFAULT 0`, (err) => {});
+        } catch (e) {}
     });
 }
 
@@ -98,7 +106,8 @@ const io = new Server(httpServer, {
 });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Configure Multer for temp uploads
 const uploadDir = path.join(__dirname, 'uploads');
@@ -176,11 +185,23 @@ app.post(`/webhook/${INSTANCE_NAME}`, (req, res) => {
                      content = msgData.message.extendedTextMessage.text;
                      type = 'extendedTextMessage';
                  } else if (msgData.message.imageMessage) {
-                     content = msgData.message.imageMessage.caption || '[Imagem]';
-                     type = 'imageMessage';
+                    const b64 = msgData.base64 || msgData.message.base64;
+                    if (b64 && typeof b64 === 'string') {
+                        const dataUrl = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
+                        content = dataUrl;
+                    } else {
+                        content = msgData.message.imageMessage.url || msgData.message.imageMessage.caption || '[Imagem]';
+                    }
+                    type = 'imageMessage';
                  } else if (msgData.message.audioMessage) {
-                     content = '[Áudio]';
-                     type = 'audioMessage';
+                    const b64a = msgData.base64 || msgData.message.base64;
+                    if (b64a && typeof b64a === 'string') {
+                        const dataUrl = b64a.startsWith('data:') ? b64a : `data:audio/mpeg;base64,${b64a}`;
+                        content = dataUrl;
+                    } else {
+                        content = msgData.message.audioMessage.url || '[Áudio]';
+                    }
+                    type = 'audioMessage';
                  } else {
                      content = JSON.stringify(msgData.message);
                  }
@@ -251,6 +272,7 @@ app.get('/api/chats', (req, res) => {
             COALESCE(rs.lastReadTimestamp, 0) AS lastReadTimestamp
         FROM chats c
         LEFT JOIN read_state rs ON rs.remoteJid = c.remoteJid
+        WHERE COALESCE(c.deleted, 0) = 0
         ORDER BY c.lastMessageTimestamp DESC
     `, [], (err, rows) => {
         if (err) {
@@ -263,7 +285,7 @@ app.get('/api/chats', (req, res) => {
 
 app.get('/api/messages/:remoteJid', (req, res) => {
     const { remoteJid } = req.params;
-    db.all(`SELECT * FROM messages WHERE remoteJid = ? ORDER BY timestamp ASC`, [remoteJid], (err, rows) => {
+    db.all(`SELECT * FROM messages WHERE remoteJid = ? AND COALESCE(deleted, 0) = 0 ORDER BY timestamp ASC`, [remoteJid], (err, rows) => {
         if (err) {
             res.status(500).json({ error: err.message });
             return;
@@ -297,10 +319,12 @@ app.get('/api/unread-counts', (req, res) => {
             COALESCE(SUM(CASE 
                 WHEN m.fromMe = 0 
                  AND m.timestamp > COALESCE(rs.lastReadTimestamp, 0) 
+                 AND COALESCE(m.deleted, 0) = 0
                 THEN 1 ELSE 0 END), 0) AS unread
         FROM chats c
         LEFT JOIN messages m ON m.remoteJid = c.remoteJid
         LEFT JOIN read_state rs ON rs.remoteJid = c.remoteJid
+        WHERE COALESCE(c.deleted, 0) = 0
         GROUP BY c.remoteJid
     `;
     db.all(sql, [], (err, rows) => {
@@ -327,19 +351,19 @@ app.get('/api/health', (req, res) => {
 
 app.delete('/api/chats/:remoteJid', (req, res) => {
     const { remoteJid } = req.params;
-    // Transaction to delete messages and then chat
+    // Soft-delete: mark as deleted without removing data
     db.serialize(() => {
-        db.run(`DELETE FROM messages WHERE remoteJid = ?`, [remoteJid], (err) => {
+        db.run(`UPDATE messages SET deleted = 1 WHERE remoteJid = ?`, [remoteJid], (err) => {
             if (err) {
-                console.error('Error deleting messages:', err);
+                console.error('Error soft-deleting messages:', err);
             }
         });
-        db.run(`DELETE FROM chats WHERE remoteJid = ?`, [remoteJid], function(err) {
+        db.run(`UPDATE chats SET deleted = 1 WHERE remoteJid = ?`, [remoteJid], function(err) {
             if (err) {
                 res.status(500).json({ error: err.message });
                 return;
             }
-            res.json({ message: 'Chat deleted', changes: this.changes });
+            res.json({ message: 'Chat soft-deleted', changes: this.changes });
         });
     });
 });

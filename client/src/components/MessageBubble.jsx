@@ -27,7 +27,7 @@ export const MessageBubble = ({ message, isOwn, onReact, onDelete, onForward, on
               Respondendo: {message.quoted.text?.slice(0, 100) || 'Mensagem'}
             </div>
           )}
-          {message.type === 'image' && (
+          {message.msgType === 'image' && (
             <div className="mb-2">
               <img 
                 src={message.mediaUrl || message.text} 
@@ -38,16 +38,16 @@ export const MessageBubble = ({ message, isOwn, onReact, onDelete, onForward, on
             </div>
           )}
           
-          {message.type === 'audio' && (
+          {message.msgType === 'audio' && (
              <audio controls className="w-full min-w-[200px] h-10" src={message.mediaUrl}>
              </audio>
           )}
 
-          {message.type === 'video' && (
+          {message.msgType === 'video' && (
             <video controls className="w-full max-h-64 rounded-md" src={message.mediaUrl}></video>
           )}
 
-          {message.type === 'document' && (
+          {message.msgType === 'document' && (
             <>
               {String(message.mediaUrl || '').toLowerCase().endsWith('.pdf') ? (
                 <iframe title="PDF" src={message.mediaUrl} className="w-full h-64 rounded border" />
@@ -57,15 +57,15 @@ export const MessageBubble = ({ message, isOwn, onReact, onDelete, onForward, on
             </>
           )}
 
-          {message.type === 'sticker' && (
+          {message.msgType === 'sticker' && (
             <img src={message.mediaUrl} alt="Sticker" className="h-32 w-32 object-contain" />
           )}
 
-          {message.type === 'location' && (
+          {message.msgType === 'location' && (
             <a className="text-primary underline" href={`https://www.google.com/maps?q=${message.text}`} target="_blank" rel="noreferrer">Ver localização</a>
           )}
 
-          {message.type === 'poll' && (
+          {message.msgType === 'poll' && (
             <div className="mb-2">
               <div className="font-semibold mb-1">{message.text}</div>
               {/* options list not interactive */}
@@ -79,7 +79,7 @@ export const MessageBubble = ({ message, isOwn, onReact, onDelete, onForward, on
             </div>
           )}
 
-          {(!message.type || message.type === 'text' || message.type === 'in' || message.type === 'out') && (
+          {(!message.msgType || message.msgType === 'text') && (
             <p className="whitespace-pre-wrap">{message.text}</p>
           )}
           
