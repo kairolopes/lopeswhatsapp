@@ -402,10 +402,16 @@ app.get('/api/simulate-webhook', (req, res) => {
 // Automatic Webhook Setup Endpoint
 app.get('/api/setup-webhook', async (req, res) => {
     try {
-        // Construct the webhook URL based on the current request host (or environment variable)
-        const host = req.get('host');
-        const protocol = req.protocol === 'http' && host.includes('localhost') ? 'http' : 'https';
-        const webhookUrl = `${protocol}://${host}/webhook/${INSTANCE_NAME}`;
+        const overrideBase = req.query.baseUrl || req.query.base || req.query.url || null;
+        let webhookUrl;
+        if (overrideBase) {
+            const base = String(overrideBase).replace(/\/$/, '');
+            webhookUrl = `${base}/webhook/${INSTANCE_NAME}`;
+        } else {
+            const host = req.get('host');
+            const protocol = req.protocol === 'http' && host.includes('localhost') ? 'http' : 'https';
+            webhookUrl = `${protocol}://${host}/webhook/${INSTANCE_NAME}`;
+        }
         
         const url = `${EVOLUTION_URL}/webhook/set/${INSTANCE_NAME}`;
         const headers = { 
