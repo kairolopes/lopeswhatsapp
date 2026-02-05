@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Evolution API – Guia Completo de Integração (Instância "kairo2")</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --color: #1a1a1a;
+      --muted: #666;
+      --bg: #fff;
+      --border: #ddd;
+      --primary: #0b5fff;
+    }
+    html, body {
+      background: var(--bg);
+      color: var(--color);
+      font-family: var(--font-body);
+      line-height: 1.6;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+    h1, h2, h3 {
+      margin: 24px 0 12px;
+      line-height: 1.3;
+    }
+    h1 { font-size: 28px; }
+    h2 { font-size: 22px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+    h3 { font-size: 18px; }
+    p, li { font-size: 15px; }
+    code, pre {
+      font-family: var(--font-mono);
+      background: #f7f7f9;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    pre {
+      padding: 12px 14px;
+      overflow: auto;
+      font-size: 13px;
+    }
+    code {
+      padding: 2px 6px;
+      font-size: 13px;
+    }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    ul { padding-left: 20px; }
+    .kbd { border: 1px solid var(--border); border-bottom-width: 3px; border-radius: 4px; padding: 2px 6px; font-family: var(--font-mono); }
+    @media print {
+      a { color: inherit; text-decoration: none; }
+      .no-print { display: none !important; }
+      .container { padding: 0; }
+      pre { background: #fff; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Evolution API – Guia Completo de Integração (Instância "kairo2")</h1>
+    <p>Este documento orienta a integração da Evolution API com sua plataforma, incluindo: autenticação, configuração de Webhook por evento, recebimento de QR Code, envio de mensagens (texto, mídia, áudio, stickers), reações com emojis, contatos, conversas e foto de perfil.</p>
+
+    <h2>Visão Geral</h2>
+    <ul>
+      <li>Multi‑tenant: todas as rotas usam <code>/:instanceName</code> (ex.: <code>/message/sendText/kairo2</code>).</li>
+      <li>Autenticação: enviar sempre o cabeçalho <code>apikey</code> com o token da instância.</li>
+      <li>Webhook por evento: <code>byEvents: true</code> organiza a entrega em sub‑URLs por evento.</li>
+      <li>Mídia: pode ser enviada por URL ou base64.</li>
+      <li>Foto do perfil (<code>profilePicUrl</code>): já vem em eventos e consultas.</li>
+    </ul>
+
+    <h2>Autenticação</h2>
+    <ul>
+      <li>Header obrigatório em todas as chamadas: <code>apikey</code>.</li>
+      <li><strong>Dois tipos de chave</strong> aceitos:
+        <ul>
+          <li><strong>Token da instância</strong> (recomendado para rotas com <code>:instanceName</code>): usar o token específico da instância.</li>
+          <li><strong>Chave global</strong> (admin): funciona em todas as rotas; use apenas se quiser um único segredo para toda a API.</li>
+        </ul>
+      </li>
+      <li>Exemplo com <strong>token da instância</strong>:
+        <pre><code>curl -X GET "https://evolution-api-1p4o.onrender.com/webhook/find/kairo2" \
+  -H "apikey: TOKEN_DA_INSTANCIA"</code></pre>
+      </li>
+      <li>Exemplo com <strong>chave global</strong>:
+        <pre><code>curl -X GET "https://evolution-api-1p4o.onrender.com/webhook/find/kairo2" \
+  -H "apikey: CHAVE_GLOBAL_API"</code></pre>
+      </li>
+      <li><code>:instanceName</code> no caminho da rota (ex.: <code>/message/sendText/kairo2</code>).</li>
+    </ul>
+
+    <h2>Webhook – Configuração</h2>
+    <ul>
+      <li>Definir/alterar: <code>POST /webhook/set/:instanceName</code></li>
+      <li>Consultar: <code>GET /webhook/find/:instanceName</code></li>
+      <li>Com <code>byEvents: true</code>, cada evento é entregue em uma sub‑URL específica (ex.: <code>/webhook/kairo2/messages-upsert</code>)</li>
+      <li>Com <code>base64: true</code>, mídias recebidas podem incluir <code>data.message.base64</code></li>
+    </ul>
+    <p><strong>Importante:</strong> “SEU_SERVER” é a URL da Evolution API. Sua API base é <code>https://evolution-api-1p4o.onrender.com/</code>. O destino de webhook (sua aplicação cliente) é <code>https://lopeswhatsapp.onrender.com/webhook/kairo2</code>.</p>
+
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/webhook/set/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{
+    "webhook": {
+      "enabled": true,
+      "url": "https://lopeswhatsapp.onrender.com/webhook/kairo2",
+      "byEvents": true,
+      "base64": true
+    }
+  }'</code></pre>
+
+    <pre><code>curl -X GET "https://evolution-api-1p4o.onrender.com/webhook/find/kairo2" \
+  -H "apikey: SEU_TOKEN"</code></pre>
+
+    <p>URLs criadas quando <code>byEvents: true</code>:</p>
+    <ul>
+      <li><code>/webhook/kairo2/messages-upsert</code></li>
+      <li><code>/webhook/kairo2/send-message-update</code></li>
+      <li><code>/webhook/kairo2/contacts-update</code></li>
+      <li><code>/webhook/kairo2/chats-upsert</code></li>
+      <li><code>/webhook/kairo2/chats-update</code></li>
+      <li><code>/webhook/kairo2/qrcode-updated</code></li>
+      <li><code>/webhook/kairo2/connection-update</code></li>
+    </ul>
+
+    <h2>Webhook – Como ler o payload</h2>
+    <ul>
+      <li>Campos padrão: <code>event</code>, <code>instance</code>, <code>data</code>, <code>date_time</code>, <code>sender</code>, <code>server_url</code>, <code>apikey</code></li>
+      <li>Direção: <code>data.key.fromMe</code> indica enviado/recebido</li>
+      <li>Número: pegar a parte antes de <code>@</code> em <code>data.key.remoteJid</code></li>
+      <li>Ordenação: usar <code>data.messageTimestamp</code></li>
+      <li>Mídia: com <code>base64: true</code>, pode existir <code>data.message.base64</code></li>
+      <li>Foto: usar <code>data.profilePicUrl</code> quando presente</li>
+      <li>Status: ler <code>data.status</code> nos eventos de update</li>
+    </ul>
+
+    <h3>Exemplo messages-upsert</h3>
+    <pre><code>{
+  "event": "MESSAGES_UPSERT",
+  "instance": "kairo2",
+  "data": {
+    "key": { "id": "ABCD1234", "fromMe": false, "remoteJid": "556231901280@s.whatsapp.net" },
+    "messageType": "imageMessage",
+    "messageTimestamp": 1738780000,
+    "pushName": "Contato",
+    "profilePicUrl": "https://.../avatar.jpg",
+    "message": {
+      "imageMessage": { "url": "https://.../image.jpg", "mimetype": "image/jpeg", "caption": "Olá!" },
+      "base64": "data:image/png;base64,iVBORw0KGgo..."
+    }
+  },
+  "date_time": "2026-02-05T18:12:34.000Z",
+  "sender": "5562xxxxxxx@s.whatsapp.net",
+  "server_url": "https://evolution-api-1p4o.onrender.com",
+  "apikey": "SEU_TOKEN"
+}</code></pre>
+
+    <h3>Exemplo send-message-update</h3>
+    <pre><code>{
+  "event": "SEND_MESSAGE_UPDATE",
+  "instance": "kairo2",
+  "data": {
+    "key": { "id": "ABCD1234", "fromMe": true, "remoteJid": "556231901280@s.whatsapp.net" },
+    "status": "DELIVERY_ACK",
+    "messageTimestamp": 1738780100
+  },
+  "date_time": "2026-02-05T18:13:20.000Z"
+}</code></pre>
+
+    <h3>Exemplo contacts-update</h3>
+    <pre><code>{
+  "event": "CONTACTS_UPDATE",
+  "instance": "kairo2",
+  "data": {
+    "remoteJid": "556231901280@s.whatsapp.net",
+    "pushName": "Contato Atualizado",
+    "profilePicUrl": "https://.../avatar.jpg",
+    "instanceId": "..."
+  },
+  "date_time": "2026-02-05T18:20:00.000Z"
+}</code></pre>
+
+    <h3>Exemplo qrcode-updated</h3>
+    <pre><code>{
+  "event": "QRCODE_UPDATED",
+  "instance": "kairo2",
+  "data": {
+    "qrcode": {
+      "base64": "data:image/png;base64,iVBORw0KGgo...",
+      "pairingCode": "12345678"
+    },
+    "statusCode": 200
+  },
+  "date_time": "2026-02-05T18:22:00.000Z"
+}</code></pre>
+
+    <h3>Exemplo connection-update</h3>
+    <pre><code>{ "event": "CONNECTION_UPDATE", "instance": "kairo2", "data": { "status": "open" } }</code></pre>
+
+    <h2>Envio de Mensagens</h2>
+    <p>Sempre enviar <code>apikey: SEU_TOKEN</code>.</p>
+    <h3>Texto</h3>
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/message/sendText/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{ "number": "556231901280", "text": "Olá, tudo bem?" }'</code></pre>
+
+    <h3>Mídia</h3>
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/message/sendMedia/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{
+    "number": "556231901280",
+    "mediatype": "image",
+    "caption": "Foto",
+    "media": "https://raw.githubusercontent.com/github/explore/main/topics/cat/cat.png"
+  }'</code></pre>
+
+    <h3>Áudio</h3>
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/message/sendAudio/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{ "number": "556231901280", "audio": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" }'</code></pre>
+
+    <h3>Sticker</h3>
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/message/sendSticker/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{ "number": "556231901280", "sticker": "https://lopeswhatsapp.onrender.com/public/sticker.webp" }'</code></pre>
+
+    <h3>Buttons</h3>
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/message/sendButtons/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{
+    "number": "556231901280",
+    "title": "Escolha uma opção",
+    "buttons": [
+      { "type": "reply", "displayText": "Sim", "id": "SIM" },
+      { "type": "reply", "displayText": "Não", "id": "NAO" }
+    ]
+  }'</code></pre>
+
+    <h3>Localização</h3>
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/message/sendLocation/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{ "number": "556231901280", "latitude": -23.55052, "longitude": -46.633308, "name": "Centro", "address": "São Paulo" }'</code></pre>
+
+    <h3>Reação com emoji</h3>
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/message/sendReaction/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{
+    "key": { "id": "ABCD1234", "fromMe": false, "remoteJid": "556231901280@s.whatsapp.net" },
+    "reaction": "❤️"
+  }'</code></pre>
+
+    <h3>Contato</h3>
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/message/sendContact/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{
+    "number": "556231901280",
+    "contact": [
+      { "fullName": "Maria", "wuid": "556231901280", "phoneNumber": "556231901280", "email": "maria@example.com", "organization": "Empresa X", "url": "https://example.com" }
+    ]
+  }'</code></pre>
+
+    <h2>Foto de Perfil</h2>
+    <p>Atualizar foto da instância via URL pública ou base64 bruto (sem prefixo <code>data:image/...</code>).</p>
+    <h3>Atualizar foto</h3>
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/chat/updateProfilePicture/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{ "picture": "https://example.com/avatar.jpg" }'</code></pre>
+
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/chat/updateProfilePicture/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{ "picture": "iVBORw0KGgoAAAANSUhEUgAA..." }'</code></pre>
+
+    <h3>Remover foto</h3>
+    <pre><code>curl -X DELETE "https://evolution-api-1p4o.onrender.com/chat/removeProfilePicture/kairo2" \
+  -H "apikey: SEU_TOKEN"</code></pre>
+
+    <h3>Buscar URL da foto de um número</h3>
+    <pre><code>curl -X POST "https://evolution-api-1p4o.onrender.com/chat/fetchProfilePictureUrl/kairo2" \
+  -H "Content-Type: application/json" \
+  -H "apikey: SEU_TOKEN" \
+  -d '{ "number": "556231901280" }'</code></pre>
+
+    <h2>QR Code e Conexão</h2>
+    <ul>
+      <li>Receber QR: <code>/webhook/kairo2/qrcode-updated</code> (com base64)</li>
+      <li>Iniciar conexão: <code>GET /instance/connect/kairo2</code> (header <code>apikey</code>)</li>
+      <li>Estado: <code>GET /instance/connectionState/kairo2</code></li>
+    </ul>
+
+    <h2>Deploy na Render (resumo)</h2>
+    <ul>
+      <li><code>DATABASE_PROVIDER=postgresql</code></li>
+      <li><code>DATABASE_CONNECTION_URI=postgresql://usuario:senha@host:5432/dbname</code></li>
+      <li><code>SERVER.URL=https://evolution-api-1p4o.onrender.com</code></li>
+      <li><code>AUTHENTICATION.API_KEY.KEY=SEU_TOKEN_GLOBAL</code> (opcional)</li>
+      <li><code>export DATABASE_PROVIDER=postgresql && npm install && npm run db:generate && npm run db:deploy && npm run build</code></li>
+      <li><code>npm run start:prod</code></li>
+    </ul>
+
+    <h2>Boas Práticas</h2>
+    <ul>
+      <li>Responder <code>200 OK</code> imediato no webhook; processar depois.</li>
+      <li>Persistir <code>data.key.id</code> para casar status de envio.</li>
+      <li>Agrupar por <code>remoteJid</code> e ordenar por <code>messageTimestamp</code>.</li>
+      <li>Armazenar/atualizar <code>profilePicUrl</code> conforme eventos.</li>
+    </ul>
+
+    <h2>Troubleshooting</h2>
+    <ul>
+      <li><strong>401/403</strong>: verifique <code>apikey</code> e <code>instanceName</code>.</li>
+      <li><strong>404</strong> em <code>/webhook/find/kairo2</code>: use exatamente <code>/webhook/find/:instanceName</code>.</li>
+      <li><strong>Mídia 500</strong>: usar URLs públicas válidas ou base64; validar <code>mimetype</code>.</li>
+      <li><strong>Sem QR</strong>: confirmar <code>/webhook/set</code> com <code>enabled=true</code>, <code>byEvents=true</code>, <code>base64=true</code>.</li>
+    </ul>
+
+    <p class="no-print"><strong>Para salvar em PDF:</strong> Abra este arquivo no navegador e pressione <span class="kbd">Ctrl</span>+<span class="kbd">P</span> (Windows) e selecione “Salvar como PDF”.</p>
+  </div>
+</body>
+</html>

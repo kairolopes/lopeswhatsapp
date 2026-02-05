@@ -11,7 +11,20 @@ export const ChatWindow = ({
   onSend,
   onSendMedia,
   onSendAudio,
+  onSendLocation,
   onHeaderClick,
+  onReactMessage,
+  onDeleteMessage,
+  onForwardMessage,
+  replyTo,
+  onCancelReply,
+  selectable,
+  selectedIds,
+  onToggleSelect,
+  onBulkDelete,
+  onBulkForward,
+  onReplyMessage,
+  onEditMessage,
   className 
 }) => {
   const messagesEndRef = useRef(null);
@@ -75,13 +88,30 @@ export const ChatWindow = ({
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 md:px-12 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat bg-center">
+        {Array.isArray(selectedIds) && selectedIds.length > 0 && (
+          <div className="mb-2 bg-white border border-gray-200 rounded p-2 flex items-center justify-between">
+            <span className="text-sm text-gray-700">{selectedIds.length} selecionada(s)</span>
+            <div className="flex gap-2">
+              <button className="px-2 py-1 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100" onClick={onBulkDelete}>Apagar</button>
+              <button className="px-2 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200" onClick={onBulkForward}>Encaminhar</button>
+            </div>
+          </div>
+        )}
          {messages.map((msg, idx) => (
-           <MessageBubble 
-             key={idx} 
-             message={msg} 
-             isOwn={msg.type === 'out'} 
-           />
-         ))}
+          <MessageBubble 
+            key={idx} 
+            message={msg} 
+            isOwn={msg.type === 'out'} 
+            onReact={onReactMessage}
+            onDelete={onDeleteMessage}
+            onForward={onForwardMessage}
+            onReply={onReplyMessage}
+            onEdit={onEditMessage}
+            selectable={selectable}
+            selected={Array.isArray(selectedIds) ? selectedIds.includes(msg.id) : false}
+            onToggleSelect={onToggleSelect}
+          />
+        ))}
          <div ref={messagesEndRef} />
       </div>
 
@@ -90,6 +120,9 @@ export const ChatWindow = ({
         onSend={onSend} 
         onSendMedia={onSendMedia} 
         onSendAudio={onSendAudio} 
+        onSendLocation={onSendLocation}
+        replyTo={replyTo}
+        onCancelReply={onCancelReply}
         onComposePoll={() => {
           const title = window.prompt('Pergunta da enquete:');
           if (!title) return;

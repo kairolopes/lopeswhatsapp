@@ -1,9 +1,9 @@
 import React, { useState, useRef } from 'react';
-import { Smile, Paperclip, Mic, Send, FilePlus } from 'lucide-react';
+import { Smile, Paperclip, Mic, Send, FilePlus, MapPin } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 import { cn } from '../lib/utils';
 
-export const ChatInput = ({ onSend, onSendMedia, onSendAudio, onComposePoll }) => {
+export const ChatInput = ({ onSend, onSendMedia, onSendAudio, onComposePoll, onSendLocation, replyTo, onCancelReply }) => {
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const fileInputRef = useRef(null);
@@ -77,6 +77,15 @@ export const ChatInput = ({ onSend, onSendMedia, onSendAudio, onComposePoll }) =
 
   return (
     <div className="bg-[#f0f2f5] px-4 py-3 flex items-center gap-4 relative">
+      {replyTo && (
+        <div className="absolute -top-16 left-4 right-4 bg-white rounded shadow p-2 border border-gray-200">
+          <div className="text-xs text-gray-600">Respondendo:</div>
+          <div className="text-sm text-gray-800 truncate">{replyTo.text}</div>
+          <div className="flex justify-end mt-1">
+            <button onClick={onCancelReply} className="text-gray-500 hover:text-gray-700">Cancelar</button>
+          </div>
+        </div>
+      )}
       {/* Emoji Picker Popover */}
       {showEmoji && (
         <div className="absolute bottom-16 left-4 z-50">
@@ -108,11 +117,18 @@ export const ChatInput = ({ onSend, onSendMedia, onSendAudio, onComposePoll }) =
         >
           <FilePlus size={24} />
         </button>
+        <button 
+          onClick={() => onSendLocation && onSendLocation()}
+          className="hover:text-gray-700 transition-colors"
+          title="Enviar localização"
+        >
+          <MapPin size={24} />
+        </button>
         <input 
           type="file" 
           ref={fileInputRef} 
           className="hidden" 
-          accept="image/*,audio/*,video/*"
+          accept="image/*,audio/*,video/*,application/*,.webp"
           onChange={handleFileChange}
         />
       </div>

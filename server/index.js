@@ -528,22 +528,17 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         const formData = new FormData();
         formData.append('number', number);
         
-        // Handle specific media types
         if (type === 'audio') {
-             // Evolution API specific for Voice Notes (PTT)
-             url = `${EVOLUTION_URL}/sendMessage/sendWhatsAppAudio/${INSTANCE_NAME}`;
-             formData.append('remoteJid', toRemoteJid(number));
-             formData.append('file', fs.createReadStream(file.path), { filename: file.originalname, contentType: file.mimetype });
-             // Some versions allow delay/presence options here too
+            url = `${EVOLUTION_URL}/sendMessage/sendWhatsAppAudio/${INSTANCE_NAME}`;
+            formData.append('remoteJid', toRemoteJid(number));
+            formData.append('file', fs.createReadStream(file.path), { filename: file.originalname, contentType: file.mimetype });
         } else {
-             // Prefer dedicated endpoint for images when available
-             const mediaType = (type && type.toLowerCase()) || 'image';
-             // Default to generic sendMedia, which is widely supported
-             url = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
-             formData.append('mediatype', mediaType);
-             formData.append('mimetype', file.mimetype);
-             if (caption) formData.append('caption', caption);
-             formData.append('file', fs.createReadStream(file.path));
+            const t = (type && type.toLowerCase()) || 'image';
+            url = `${EVOLUTION_URL}/message/sendMedia/${INSTANCE_NAME}`;
+            formData.append('mediatype', t);
+            formData.append('mimetype', file.mimetype);
+            if (caption) formData.append('caption', caption);
+            formData.append('file', fs.createReadStream(file.path));
         }
 
         console.log(`Target URL: ${url}`); 
@@ -634,14 +629,14 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         if (response.data && response.data.key) {
             const msgId = response.data.key.id;
             const remoteJid = response.data.key.remoteJid || (number.includes('@') ? number : number + '@s.whatsapp.net');
-            const content = previewUrl || caption || (type === 'audio' ? '[Áudio Enviado]' : '[Mídia Enviada]');
+            const content = previewUrl || caption || (type === 'audio' ? '[Áudio Enviado]' : (type === 'sticker' ? '[Sticker Enviado]' : (type === 'video' ? '[Vídeo Enviado]' : (type === 'document' ? '[Documento Enviado]' : '[Mídia Enviada]'))));
             
             saveMessage({
                 id: msgId,
                 remoteJid: remoteJid,
                 fromMe: true,
                 content: content,
-                type: type === 'audio' ? 'audioMessage' : 'imageMessage',
+                type: type === 'audio' ? 'audioMessage' : (type === 'sticker' ? 'stickerMessage' : (type === 'video' ? 'videoMessage' : (type === 'document' ? 'documentMessage' : 'imageMessage'))),
                 timestamp: Date.now(),
                 status: 'sent'
             });
@@ -675,6 +670,168 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
     }
 });
 
+// Send Reaction
+app.post('/api/send-reaction', async (req, res) => {
+    try {
+        const { remoteJid, id, emoji } = req.body;
+        if (!remoteJid || !id || !emoji) return res.status(400).json({ error: 'Missing remoteJid, id or emoji' });
+        const headers = { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY };
+        const payload = { remoteJid, id, emoji };
+        let response;
+        try {
+            const url = `${EVOLUTION_URL}/message/sendReaction/${INSTANCE_NAME}`;
+            response = await axios.post(url, payload, { headers });
+        } catch (e1) {
+            const url2 = `${EVOLUTION_URL}/sendMessage/sendReaction/${INSTANCE_NAME}`;
+            response = await axios.post(url2, payload, { headers });
+        }
+        res.json(response.data || { success: true });
+    } catch (error) {
+        res.status(error.response?.status || 500).json({ error: 'Failed to send reaction', details: error.response?.data || error.message });
+    }
+});
+
+// Reply (quoted) message
+app.post('/api/reply-message', async (req, res) => {
+    try {
+        const { number, text, quotedId } = req.body;
+        if (!number || !text || !quotedId) return res.status(400).json({ error: 'Missing number, text or quotedId' });
+        const headers = { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY };
+        const payload = { remoteJid: toRemoteJid(number), text, quotedMessageId: quotedId };
+        let response;
+        try {
+            const url = `${EVOLUTION_URL}/message/replyMessage/${INSTANCE_NAME}`;
+            response = await axios.post(url, payload, { headers });
+        } catch (e1) {
+            try {
+                const url2 = `${EVOLUTION_URL}/sendMessage/replyMessage/${INSTANCE_NAME}`;
+                response = await axios.post(url2, payload, { headers });
+            } catch (e2) {
+                // Fallback: sendText with quotedMessageId in payload (supported by some versions)
+                const url3 = `${EVOLUTION_URL}/message/sendText/${INSTANCE_NAME}`;
+                response = await axios.post(url3, payload, { headers });
+            }
+        }
+        if (response.data && response.data.key) {
+            const msgId = response.data.key.id;
+            const remoteJid = response.data.key.remoteJid || toRemoteJid(number);
+            saveMessage({ id: msgId, remoteJid, fromMe: true, content: text, type: 'conversation', timestamp: Date.now(), status: 'sent' });
+        }
+        res.json(response.data);
+    } catch (error) {
+        res.status(error.response?.status || 500).json({ error: 'Failed to reply message', details: error.response?.data || error.message });
+    }
+});
+
+// Edit text message
+app.post('/api/edit-message', async (req, res) => {
+    try {
+        const { remoteJid, id, text } = req.body;
+        if (!remoteJid || !id || !text) return res.status(400).json({ error: 'Missing remoteJid, id or text' });
+        const headers = { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY };
+        const payload = { remoteJid, id, text };
+        let response;
+        try {
+            const url = `${EVOLUTION_URL}/message/editMessage/${INSTANCE_NAME}`;
+            response = await axios.post(url, payload, { headers });
+        } catch (e1) {
+            try {
+                const url2 = `${EVOLUTION_URL}/sendMessage/editMessage/${INSTANCE_NAME}`;
+                response = await axios.post(url2, payload, { headers });
+            } catch (e2) {
+                // Fallback: revoke + re-send
+                try {
+                    const delUrl = `${EVOLUTION_URL}/message/revoke/${INSTANCE_NAME}`;
+                    await axios.post(delUrl, { remoteJid, id }, { headers });
+                } catch {}
+                const sendUrl = `${EVOLUTION_URL}/message/sendText/${INSTANCE_NAME}`;
+                response = await axios.post(sendUrl, { number: remoteJid.split('@')[0], text }, { headers });
+            }
+        }
+        db.run(`UPDATE messages SET content = ? WHERE id = ?`, [text, id], (err) => {
+            if (err) console.error('Error updating edited message:', err.message);
+        });
+        res.json(response.data || { success: true });
+    } catch (error) {
+        res.status(error.response?.status || 500).json({ error: 'Failed to edit message', details: error.response?.data || error.message });
+    }
+});
+// Delete for everyone
+app.post('/api/delete-message', async (req, res) => {
+    try {
+        const { remoteJid, id } = req.body;
+        if (!remoteJid || !id) return res.status(400).json({ error: 'Missing remoteJid or id' });
+        const headers = { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY };
+        const payload = { remoteJid, id };
+        let response;
+        try {
+            const url = `${EVOLUTION_URL}/message/deleteMessage/${INSTANCE_NAME}`;
+            response = await axios.post(url, payload, { headers });
+        } catch (e1) {
+            try {
+                const url2 = `${EVOLUTION_URL}/message/revoke/${INSTANCE_NAME}`;
+                response = await axios.post(url2, payload, { headers });
+            } catch (e2) {
+                const url3 = `${EVOLUTION_URL}/sendMessage/deleteMessage/${INSTANCE_NAME}`;
+                response = await axios.post(url3, payload, { headers });
+            }
+        }
+        db.run(`UPDATE messages SET content = ?, type = ?, status = ? WHERE id = ?`, ['Mensagem apagada', 'conversation', 'deleted', id]);
+        res.json(response.data || { success: true });
+    } catch (error) {
+        res.status(error.response?.status || 500).json({ error: 'Failed to delete message', details: error.response?.data || error.message });
+    }
+});
+
+// Forward message
+app.post('/api/forward-message', async (req, res) => {
+    try {
+        const { id, to } = req.body;
+        if (!id || !to) return res.status(400).json({ error: 'Missing id or target' });
+        const headers = { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY };
+        const payload = { id, remoteJid: toRemoteJid(to) };
+        let response;
+        try {
+            const url = `${EVOLUTION_URL}/message/forwardMessage/${INSTANCE_NAME}`;
+            response = await axios.post(url, payload, { headers });
+        } catch (e1) {
+            const url2 = `${EVOLUTION_URL}/sendMessage/forwardMessage/${INSTANCE_NAME}`;
+            response = await axios.post(url2, payload, { headers });
+        }
+        res.json(response.data || { success: true });
+    } catch (error) {
+        res.status(error.response?.status || 500).json({ error: 'Failed to forward message', details: error.response?.data || error.message });
+    }
+});
+
+// Send location
+app.post('/api/send-location', async (req, res) => {
+    try {
+        const { number, latitude, longitude, name, address } = req.body;
+        if (!number || typeof latitude !== 'number' || typeof longitude !== 'number') {
+            return res.status(400).json({ error: 'Missing number or coordinates' });
+        }
+        const headers = { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY };
+        const payload = { remoteJid: toRemoteJid(number), latitude, longitude, name, address };
+        let response;
+        try {
+            const url = `${EVOLUTION_URL}/message/sendLocation/${INSTANCE_NAME}`;
+            response = await axios.post(url, payload, { headers });
+        } catch (e1) {
+            const url2 = `${EVOLUTION_URL}/sendMessage/sendLocation/${INSTANCE_NAME}`;
+            response = await axios.post(url2, payload, { headers });
+        }
+        if (response.data && response.data.key) {
+            const msgId = response.data.key.id;
+            const remoteJid = response.data.key.remoteJid || toRemoteJid(number);
+            const content = `${latitude},${longitude}`;
+            saveMessage({ id: msgId, remoteJid, fromMe: true, content, type: 'locationMessage', timestamp: Date.now(), status: 'sent' });
+        }
+        res.json(response.data || { success: true });
+    } catch (error) {
+        res.status(error.response?.status || 500).json({ error: 'Failed to send location', details: error.response?.data || error.message });
+    }
+});
 // Send Audio via base64/url JSON (for microphone recordings)
 app.post('/api/send-audio', async (req, res) => {
     try {

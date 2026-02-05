@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
-import { Check, CheckCheck } from 'lucide-react';
+import { Check, CheckCheck, Smile, Trash2, Forward, Reply, Edit, Square, CheckSquare } from 'lucide-react';
 
-export const MessageBubble = ({ message, isOwn }) => {
+export const MessageBubble = ({ message, isOwn, onReact, onDelete, onForward, onReply, onEdit, selectable, selected, onToggleSelect }) => {
+  const [showReactions, setShowReactions] = useState(false);
   return (
     <div className={cn("flex w-full mb-2", isOwn ? "justify-end" : "justify-start")}>
       <div
@@ -21,6 +22,11 @@ export const MessageBubble = ({ message, isOwn }) => {
 
         {/* Content */}
         <div className="text-sm text-gray-800 break-words">
+          {message.quoted && (
+            <div className="mb-1 text-xs text-gray-600 border-l-2 border-gray-300 pl-2">
+              Respondendo: {message.quoted.text?.slice(0, 100) || 'Mensagem'}
+            </div>
+          )}
           {message.type === 'image' && (
             <div className="mb-2">
               <img 
@@ -35,6 +41,28 @@ export const MessageBubble = ({ message, isOwn }) => {
           {message.type === 'audio' && (
              <audio controls className="w-full min-w-[200px] h-10" src={message.mediaUrl}>
              </audio>
+          )}
+
+          {message.type === 'video' && (
+            <video controls className="w-full max-h-64 rounded-md" src={message.mediaUrl}></video>
+          )}
+
+          {message.type === 'document' && (
+            <>
+              {String(message.mediaUrl || '').toLowerCase().endsWith('.pdf') ? (
+                <iframe title="PDF" src={message.mediaUrl} className="w-full h-64 rounded border" />
+              ) : (
+                <a className="text-primary underline" href={message.mediaUrl} target="_blank" rel="noreferrer">Abrir documento</a>
+              )}
+            </>
+          )}
+
+          {message.type === 'sticker' && (
+            <img src={message.mediaUrl} alt="Sticker" className="h-32 w-32 object-contain" />
+          )}
+
+          {message.type === 'location' && (
+            <a className="text-primary underline" href={`https://www.google.com/maps?q=${message.text}`} target="_blank" rel="noreferrer">Ver localização</a>
           )}
 
           {message.type === 'poll' && (
@@ -53,6 +81,10 @@ export const MessageBubble = ({ message, isOwn }) => {
 
           {(!message.type || message.type === 'text' || message.type === 'in' || message.type === 'out') && (
             <p className="whitespace-pre-wrap">{message.text}</p>
+          )}
+          
+          {message.reaction && (
+            <div className="mt-1 text-lg">{message.reaction}</div>
           )}
         </div>
 
@@ -81,6 +113,40 @@ export const MessageBubble = ({ message, isOwn }) => {
             </>
           )}
         </div>
+        
+        <div className="flex items-center gap-2 mt-1">
+          {selectable && (
+            <button className={cn("text-gray-500 hover:text-gray-700")} onClick={() => onToggleSelect && onToggleSelect(message)}>
+              {selected ? <CheckSquare size={16} /> : <Square size={16} />}
+            </button>
+          )}
+          <button className="text-gray-500 hover:text-gray-700" onClick={() => setShowReactions(v => !v)}>
+            <Smile size={16} />
+          </button>
+          <button className="text-gray-500 hover:text-gray-700" onClick={() => onReply && onReply(message)}>
+            <Reply size={16} />
+          </button>
+          {isOwn && message.type === 'out' && message.msgType === 'text' && (
+            <button className="text-gray-500 hover:text-gray-700" onClick={() => onEdit && onEdit(message)}>
+              <Edit size={16} />
+            </button>
+          )}
+          {isOwn && (
+            <button className="text-gray-500 hover:text-red-600" onClick={() => onDelete && onDelete(message)}>
+              <Trash2 size={16} />
+            </button>
+          )}
+          <button className="text-gray-500 hover:text-gray-700" onClick={() => onForward && onForward(message)}>
+            <Forward size={16} />
+          </button>
+        </div>
+        {showReactions && (
+          <div className="mt-1 flex gap-2">
+            {['👍','❤️','😂','😮','😢','🙏'].map(e => (
+              <button key={e} className="text-xl" onClick={() => { setShowReactions(false); onReact && onReact(message, e); }}>{e}</button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

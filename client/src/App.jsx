@@ -11,6 +11,9 @@ function App() {
   const [status, setStatus] = useState('Disconnected');
   const [activeChatId, setActiveChatId] = useState(null);
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+  const [replyTo, setReplyTo] = useState(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
   
   // State for Chats (Contacts)
   // Format: { id: string (number), name: string, avatar: string, unread: number, lastMessage: string, lastMessageTime: string }
@@ -57,17 +60,24 @@ function App() {
         try {
             const res = await axios.get(`/api/messages/${activeChatId}`);
             const formattedMessages = res.data.map(m => {
-                const isImage = m.type === 'imageMessage';
-                const isAudio = m.type === 'audioMessage';
+                const t = m.type;
                 const content = m.content || '';
                 const looksLikeUrl = typeof content === 'string' && (content.startsWith('http') || content.startsWith('data:'));
+                let msgType = 'text';
+                let text = content;
+                let mediaUrl = looksLikeUrl ? content : '';
+                if (t === 'imageMessage') { msgType = 'image'; text = looksLikeUrl ? 'Imagem' : (content || 'Imagem'); }
+                else if (t === 'audioMessage') { msgType = 'audio'; text = looksLikeUrl ? 'Áudio' : (content || 'Áudio'); }
+                else if (t === 'videoMessage') { msgType = 'video'; text = looksLikeUrl ? 'Vídeo' : (content || 'Vídeo'); }
+                else if (t === 'documentMessage') { msgType = 'document'; text = looksLikeUrl ? 'Documento' : (content || 'Documento'); }
+                else if (t === 'stickerMessage') { msgType = 'sticker'; text = 'Sticker'; }
+                else if (t === 'locationMessage') { msgType = 'location'; text = content; }
                 return {
                     id: m.id,
                     type: m.fromMe ? 'out' : 'in',
-                    msgType: isImage ? 'image' : (isAudio ? 'audio' : 'text'),
-                    text: isImage ? (looksLikeUrl ? 'Imagem' : content || 'Imagem') 
-                         : (isAudio ? (looksLikeUrl ? 'Áudio' : content || 'Áudio') : content),
-                    mediaUrl: looksLikeUrl ? content : '',
+                    msgType,
+                    text,
+                    mediaUrl,
                     time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                     sender: m.fromMe ? 'me' : m.remoteJid,
                     pushName: m.pushName,
@@ -271,6 +281,16 @@ function App() {
         type = 'video';
         text = msgContent.videoMessage.caption || 'Vídeo';
         mediaUrl = msgContent.videoMessage.url || '';
+    } else if (msgContent.stickerMessage) {
+        type = 'sticker';
+        text = 'Sticker';
+        mediaUrl = msgContent.stickerMessage.url || '';
+    } else if (msgContent.locationMessage) {
+        type = 'location';
+        const lat = msgContent.locationMessage.degreesLatitude || msgContent.locationMessage.latitude;
+        const lng = msgContent.locationMessage.degreesLongitude || msgContent.locationMessage.longitude;
+        text = `${lat},${lng}`;
+        mediaUrl = '';
     }
     
     // Fallback: If text is still empty but we have a message type, try to stringify
@@ -350,6 +370,7 @@ function App() {
         msgType: 'text',
         text: text,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        quoted: replyTo ? { text: replyTo.text } : undefined
       };
 
       // Optimistic Update
@@ -365,10 +386,12 @@ function App() {
           : c
       ));
 
-      const res = await axios.post('/api/send-message', {
-        number: activeChatId,
-        text: text
-      });
+      let res;
+      if (replyTo?.id) {
+        res = await axios.post('/api/reply-message', { number: activeChatId, text, quotedId: replyTo.id });
+      } else {
+        res = await axios.post('/api/send-message', { number: activeChatId, text });
+      }
       // Reconcile optimistic with real ID if available
       const realId = res?.data?.key?.id;
       if (realId) {
@@ -378,6 +401,7 @@ function App() {
           return { ...prev, [activeChatId]: updated };
         });
       }
+      setReplyTo(null);
       // Mark chat as read after send
       try { await axios.post(`/api/chats/${activeChatId}/read`); } catch(e) {}
     } catch (error) {
@@ -390,7 +414,8 @@ function App() {
     if (!activeChatId) return;
 
     try {
-        const type = file.type.startsWith('audio') ? 'audio' : 'image';
+        const isSticker = /\.webp$/i.test(file.name) && file.type === 'image/webp';
+        const type = file.type.startsWith('audio') ? 'audio' : (file.type.startsWith('video') ? 'video' : (file.type.startsWith('application') ? 'document' : (isSticker ? 'sticker' : 'image')));
         const tempUrl = URL.createObjectURL(file); // Temporary preview
 
         const pendingId = 'PENDING:' + Date.now();
@@ -398,7 +423,7 @@ function App() {
             id: pendingId,
             type: 'out',
             msgType: type,
-            text: type === 'image' ? 'Imagem' : 'Áudio',
+            text: type === 'image' ? 'Imagem' : (type === 'audio' ? 'Áudio' : (type === 'video' ? 'Vídeo' : (type === 'document' ? 'Documento' : 'Sticker'))),
             mediaUrl: tempUrl,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
@@ -411,7 +436,7 @@ function App() {
 
         setChats(prev => prev.map(c => 
             c.id === activeChatId 
-              ? { ...c, lastMessage: type === 'image' ? '📷 Imagem' : '🎤 Áudio', lastMessageTime: newMessage.time } 
+              ? { ...c, lastMessage: type === 'image' ? '📷 Imagem' : (type === 'audio' ? '🎤 Áudio' : (type === 'video' ? '🎬 Vídeo' : (type === 'document' ? '📄 Documento' : '😀 Sticker'))), lastMessageTime: newMessage.time } 
               : c
         ));
 
@@ -443,6 +468,118 @@ function App() {
     }
   };
 
+  const handleReactMessage = async (message, emoji) => {
+    try {
+      const remoteJid = activeChatId;
+      await axios.post('/api/send-reaction', { remoteJid, id: message.id, emoji });
+      setMessages(prev => {
+        const list = prev[remoteJid] || [];
+        const updated = list.map(m => (m.id === message.id ? { ...m, reaction: emoji } : m));
+        return { ...prev, [remoteJid]: updated };
+      });
+    } catch (e) {
+      alert('Erro ao reagir');
+    }
+  };
+
+  const handleDeleteMessage = async (message) => {
+    try {
+      const remoteJid = activeChatId;
+      await axios.post('/api/delete-message', { remoteJid, id: message.id });
+      setMessages(prev => {
+        const list = prev[remoteJid] || [];
+        const updated = list.map(m => (m.id === message.id ? { ...m, msgType: 'text', type: 'in', text: 'Mensagem apagada', status: 'deleted', mediaUrl: '' } : m));
+        return { ...prev, [remoteJid]: updated };
+      });
+    } catch (e) {
+      alert('Erro ao apagar');
+    }
+  };
+
+  const handleForwardMessage = async (message) => {
+    try {
+      const to = window.prompt('Encaminhar para número (com DDI/DDI):');
+      if (!to) return;
+      await axios.post('/api/forward-message', { id: message.id, to });
+      alert('Mensagem encaminhada');
+    } catch (e) {
+      alert('Erro ao encaminhar');
+    }
+  };
+
+  const handleSendLocation = async () => {
+    if (!activeChatId) return;
+    try {
+      await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 });
+      }).then(async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        const res = await axios.post('/api/send-location', { number: activeChatId, latitude, longitude });
+        const realId = res?.data?.key?.id;
+        const text = `${latitude},${longitude}`;
+        const pendingId = 'PENDING:' + Date.now();
+        const newMessage = { id: realId || pendingId, type: 'out', msgType: 'location', text, mediaUrl: '', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+        setMessages(prev => ({ ...prev, [activeChatId]: [...(prev[activeChatId] || []), newMessage] }));
+      });
+    } catch (e) {
+      alert('Erro ao enviar localização');
+    }
+  };
+  
+  const handleReplyMessage = (message) => {
+    setReplyTo({ id: message.id, text: message.text });
+  };
+  const handleCancelReply = () => setReplyTo(null);
+  
+  const handleEditMessage = async (message) => {
+    try {
+      const newText = window.prompt('Editar mensagem:', message.text);
+      if (!newText || newText === message.text) return;
+      await axios.post('/api/edit-message', { remoteJid: activeChatId, id: message.id, text: newText });
+      setMessages(prev => {
+        const list = prev[activeChatId] || [];
+        const updated = list.map(m => (m.id === message.id ? { ...m, text: newText } : m));
+        return { ...prev, [activeChatId]: updated };
+      });
+    } catch (e) {
+      alert('Erro ao editar');
+    }
+  };
+  
+  const handleToggleSelect = (message) => {
+    setSelectionMode(true);
+    setSelectedIds(prev => prev.includes(message.id) ? prev.filter(id => id !== message.id) : [...prev, message.id]);
+  };
+  const handleBulkDelete = async () => {
+    try {
+      for (const id of selectedIds) {
+        await axios.post('/api/delete-message', { remoteJid: activeChatId, id });
+      }
+      setMessages(prev => {
+        const list = prev[activeChatId] || [];
+        const updated = list.map(m => (selectedIds.includes(m.id) ? { ...m, msgType: 'text', type: 'in', text: 'Mensagem apagada', status: 'deleted', mediaUrl: '' } : m));
+        return { ...prev, [activeChatId]: updated };
+      });
+      setSelectedIds([]);
+      setSelectionMode(false);
+    } catch (e) {
+      alert('Erro no apagar em massa');
+    }
+  };
+  const handleBulkForward = async () => {
+    try {
+      const to = window.prompt('Encaminhar selecionadas para número:');
+      if (!to) return;
+      for (const id of selectedIds) {
+        await axios.post('/api/forward-message', { id, to });
+      }
+      setSelectedIds([]);
+      setSelectionMode(false);
+      alert('Selecionadas encaminhadas');
+    } catch (e) {
+      alert('Erro no encaminhar em massa');
+    }
+  };
   const handleSendAudio = async (blob) => {
     if (!activeChatId) return;
     try {
@@ -561,7 +698,20 @@ function App() {
               onBack={() => setActiveChatId(null)}
               onSend={handleSendMessage}
               onSendMedia={handleSendMedia}
-        onSendAudio={handleSendAudio}
+              onSendAudio={handleSendAudio}
+              onSendLocation={handleSendLocation}
+            replyTo={replyTo}
+            onCancelReply={handleCancelReply}
+              onReactMessage={handleReactMessage}
+              onDeleteMessage={handleDeleteMessage}
+              onForwardMessage={handleForwardMessage}
+            selectable={selectionMode}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+            onBulkDelete={handleBulkDelete}
+            onBulkForward={handleBulkForward}
+            onReplyMessage={handleReplyMessage}
+            onEditMessage={handleEditMessage}
               onHeaderClick={() => setShowProfileInfo(!showProfileInfo)}
               className="flex-1 h-full"
             />
