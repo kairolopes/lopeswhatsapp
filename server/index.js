@@ -239,66 +239,115 @@ app.post(`/webhook/${INSTANCE_NAME}`, async (req, res) => {
              let type = msgData.messageType || 'unknown';
  
              if (msgData.message) {
-                 if (msgData.message.conversation) {
-                     content = msgData.message.conversation;
-                     type = 'conversation';
-                 } else if (msgData.message.extendedTextMessage) {
-                     content = msgData.message.extendedTextMessage.text;
-                     type = 'extendedTextMessage';
-                 } else if (msgData.message.imageMessage) {
-                    const imgMsg = msgData.message.imageMessage;
-                    console.log('--- Image Message Received ---');
-                    console.log('Keys:', Object.keys(imgMsg));
-                    
-                    const b64 = msgData.base64 || msgData.message.base64 || imgMsg.jpegThumbnail; // Fallback to thumbnail if full image missing
-                    if (b64 && typeof b64 === 'string') {
-                        const dataUrl = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
-                        content = dataUrl;
-                    } else {
-                        // Try to find a URL
-                        content = imgMsg.url || imgMsg.directPath || imgMsg.caption || '[Imagem]';
-                    }
-                    type = 'imageMessage';
-                 } else if (msgData.message.documentMessage) {
-                    const docMsg = msgData.message.documentMessage;
-                    console.log('--- Document Message Received ---');
-                    console.log('Keys:', Object.keys(docMsg));
-                    
-                    const b64 = msgData.base64 || msgData.message.base64;
-                     if (b64 && typeof b64 === 'string') {
-                        const dataUrl = b64.startsWith('data:') ? b64 : `data:application/pdf;base64,${b64}`;
-                        content = dataUrl;
-                    } else {
-                        content = docMsg.url || '[Documento]';
-                    }
-                    type = 'documentMessage';
-                 } else if (msgData.message.audioMessage) {
-                    const b64a = msgData.base64 || msgData.message.base64;
-                    if (b64a && typeof b64a === 'string') {
-                        const dataUrl = b64a.startsWith('data:') ? b64a : `data:audio/mpeg;base64,${b64a}`;
-                        content = dataUrl;
-                    } else {
-                        content = msgData.message.audioMessage.url || '[Áudio]';
-                    }
-                    type = 'audioMessage';
-                 } else {
-                     content = JSON.stringify(msgData.message);
-                 }
-             }
+                           if (msgData.message.conversation) {
+                               content = msgData.message.conversation;
+                               type = 'conversation';
+                           } else if (msgData.message.extendedTextMessage) {
+                               content = msgData.message.extendedTextMessage.text;
+                               type = 'extendedTextMessage';
+                           } else {
+                               // Media Processing Helper
+                               const processMedia = (mediaType, mediaObj) => {
+                                    try {
+                                        // Try to find base64
+                                        const b64 = msgData.base64 || msgData.message.base64 || mediaObj.base64 || mediaObj.jpegThumbnail;
+                                        
+                                        // Determine extension
+                                        const mimeMap = {
+                                            'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
+                                            'video/mp4': 'mp4', 'video/mpeg': 'mpeg',
+                                            'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/aac': 'aac',
+                                            'application/pdf': 'pdf',
+                                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+                                            'application/vnd.ms-excel': 'xls',
+                                            'application/msword': 'doc',
+                                            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+                                            'text/plain': 'txt'
+                                        };
+                                        const ext = mimeMap[mediaObj.mimetype] || 'bin';
+                                        const fileName = `${id}.${ext}`;
+                                        const filePath = path.join(uploadDir, fileName);
+                                        const fileUrl = `/uploads/${fileName}`;
+
+                                        // Save file if base64 exists
+                                        if (b64) {
+                                            const cleanB64 = b64.replace(/^data:.*,/, '');
+                                            fs.writeFileSync(filePath, Buffer.from(cleanB64, 'base64'));
+                                            console.log(`Saved media to ${filePath}`);
+                                            return fileUrl;
+                                        }
+                                        
+                                        // If no base64, check if we already downloaded it previously or if it's a URL
+                                        // Note: Downloading from mediaObj.url often requires decryption keys not available here 
+                                        // unless Evolution decrypted it.
+                                        if (mediaObj.url && !mediaObj.url.includes('mmg.whatsapp.net')) {
+                                             // If it's a public URL (e.g. from Evolution S3), we could download it.
+                                             // For now, return the URL.
+                                             return mediaObj.url;
+                                        }
+
+                                        return null; 
+                                    } catch (e) {
+                                        console.error('Error processing media:', e);
+                                        return null;
+                                    }
+                               };
+
+                               if (msgData.message.imageMessage) {
+                                  type = 'imageMessage';
+                                  const savedUrl = processMedia('image', msgData.message.imageMessage);
+                                  content = savedUrl || msgData.message.imageMessage.url || '[Imagem]';
+                                  // Fallback for preview if saving failed but we have thumbnail
+                                  if (!savedUrl && msgData.message.imageMessage.jpegThumbnail) {
+                                      content = `data:image/jpeg;base64,${msgData.message.imageMessage.jpegThumbnail}`;
+                                  }
+
+                               } else if (msgData.message.documentMessage) {
+                                  type = 'documentMessage';
+                                  const docMsg = msgData.message.documentMessage;
+                                  const savedUrl = processMedia('document', docMsg);
+                                  // Store JSON string with url and fileName for frontend
+                                  const docData = {
+                                      url: savedUrl || docMsg.url,
+                                      fileName: docMsg.fileName || 'Documento',
+                                      mimetype: docMsg.mimetype
+                                  };
+                                  content = JSON.stringify(docData);
+
+                               } else if (msgData.message.audioMessage) {
+                                  type = 'audioMessage';
+                                  const savedUrl = processMedia('audio', msgData.message.audioMessage);
+                                  content = savedUrl || msgData.message.audioMessage.url || '[Áudio]';
+
+                               } else if (msgData.message.videoMessage) {
+                                  type = 'videoMessage';
+                                  const savedUrl = processMedia('video', msgData.message.videoMessage);
+                                  content = savedUrl || msgData.message.videoMessage.url || '[Vídeo]';
+
+                               } else {
+                                   content = JSON.stringify(msgData.message);
+                               }
+                           }
+                       }
  
-             saveMessage({
-                 id,
-                 remoteJid,
-                 fromMe,
-                 content,
-                 type,
-                 timestamp: typeof timestamp === 'number' ? timestamp * 1000 : Date.now(),
-                 status: 'received',
-                 pushName
-             });
-        } catch (e) {
-            console.error('Error saving webhook data:', e);
-        }
+             const messagePayload = {
+                           id,
+                           remoteJid,
+                           fromMe,
+                           content,
+                           type,
+                           timestamp: typeof timestamp === 'number' ? timestamp * 1000 : Date.now(),
+                           status: 'received',
+                           pushName
+                       };
+                       
+                       saveMessage(messagePayload);
+                       
+                       // Emit processed message to frontend for immediate display with correct media URLs
+                       io.emit('new_message', messagePayload);
+                  } catch (e) {
+                      console.error('Error saving webhook data:', e);
+                  }
     }
     
     // Delivery/Read Status updates

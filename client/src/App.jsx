@@ -118,6 +118,10 @@ function App() {
       handleIncomingMessage(event);
     });
 
+    socket.on('new_message', (msg) => {
+        handleProcessedMessage(msg);
+    });
+
     const pollListener = async (e) => {
         try {
             const { title, options } = e.detail || {};
@@ -147,9 +151,92 @@ function App() {
       socket.off('disconnect');
       socket.off('connect_error');
       socket.off('webhook_event');
+      socket.off('new_message');
       window.removeEventListener('compose-poll', pollListener);
     };
   }, [activeChatId]); // Re-subscribe when activeChatId changes to ensure fresh closure
+
+  const handleProcessedMessage = (msg) => {
+      const isFromMe = msg.fromMe;
+      const remoteJid = msg.remoteJid;
+      const number = remoteJid.split('@')[0];
+      
+      let text = '';
+      let msgType = 'text';
+      let mediaUrl = '';
+      
+      // Parse content based on type
+      if (msg.type === 'conversation' || msg.type === 'extendedTextMessage') {
+          text = msg.content;
+      } else if (msg.type === 'imageMessage') {
+          msgType = 'image';
+          mediaUrl = msg.content;
+          text = 'Imagem';
+      } else if (msg.type === 'videoMessage') {
+          msgType = 'video';
+          mediaUrl = msg.content;
+          text = 'Vídeo';
+      } else if (msg.type === 'audioMessage') {
+          msgType = 'audio';
+          mediaUrl = msg.content;
+          text = 'Áudio';
+      } else if (msg.type === 'documentMessage') {
+          msgType = 'document';
+          try {
+              const docData = JSON.parse(msg.content);
+              mediaUrl = docData.url;
+              text = docData.fileName;
+          } catch(e) {
+              mediaUrl = msg.content;
+              text = 'Documento';
+          }
+      } else {
+          text = msg.content;
+      }
+      
+      const newMessage = {
+          id: msg.id,
+          type: isFromMe ? 'out' : 'in',
+          msgType,
+          text,
+          mediaUrl,
+          time: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          sender: number,
+          pushName: msg.pushName,
+          status: msg.status
+      };
+      
+      setMessages((prev) => {
+          const chatMessages = prev[remoteJid] || [];
+          if (msg.id && chatMessages.some(m => m.id === msg.id)) return prev;
+          return { ...prev, [remoteJid]: [...chatMessages, newMessage] };
+      });
+      
+      setChats((prev) => {
+           const existingChatIndex = prev.findIndex(c => c.id === remoteJid);
+           const existingPhoto = existingChatIndex >= 0 ? prev[existingChatIndex].avatar : null;
+           
+           const newChat = {
+               id: remoteJid,
+               name: msg.pushName || (existingChatIndex >= 0 ? prev[existingChatIndex].name : number),
+               avatar: existingPhoto,
+               unread: isFromMe ? 0 : (prev[existingChatIndex]?.unread || 0) + 1,
+               lastMessage: text,
+               lastMessageTime: newMessage.time
+           };
+           
+           let newChats;
+           if (existingChatIndex >= 0) {
+               newChats = [...prev];
+               newChats[existingChatIndex] = { ...newChats[existingChatIndex], ...newChat };
+               const item = newChats.splice(existingChatIndex, 1)[0];
+               newChats.unshift(item);
+           } else {
+               newChats = [newChat, ...prev];
+           }
+           return newChats;
+      });
+  };
 
   const handleIncomingMessage = async (event) => {
     // Status updates: update ticks without requiring message content
