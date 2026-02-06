@@ -207,10 +207,19 @@ function App() {
       };
       
       setMessages((prev) => {
-          const chatMessages = prev[remoteJid] || [];
-          if (msg.id && chatMessages.some(m => m.id === msg.id)) return prev;
-          return { ...prev, [remoteJid]: [...chatMessages, newMessage] };
-      });
+           const chatMessages = prev[remoteJid] || [];
+           const exists = chatMessages.some(m => m.id === msg.id);
+           
+           if (exists) {
+               // Update existing message with enriched data (e.g. valid mediaUrl)
+               return {
+                   ...prev,
+                   [remoteJid]: chatMessages.map(m => m.id === msg.id ? newMessage : m)
+               };
+           }
+           
+           return { ...prev, [remoteJid]: [...chatMessages, newMessage] };
+       });
       
       setChats((prev) => {
            const existingChatIndex = prev.findIndex(c => c.id === remoteJid);
